@@ -6,7 +6,7 @@ import { io } from "socket.io-client";
 const API_URL = import.meta.env.VITE_BACKEND_URL;
 
 const socket = io(import.meta.env.VITE_BACKEND_URL, {
-  transports: ['polling', 'websocket'], // Polling works better on strict mobile networks
+  transports: [ 'websocket','polling'], 
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 2000,

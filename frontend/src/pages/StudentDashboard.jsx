@@ -8,7 +8,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 
 const API_URL = import.meta.env.VITE_BACKEND_URL;
 const socket = io(API_URL, {
-  transports: ['polling', 'websocket'],
+  transports: [ 'websocket','polling'],
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 2000,
