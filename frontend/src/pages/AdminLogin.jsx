@@ -4,7 +4,15 @@ import { Shield, Lock, ArrowRight, AlertCircle, Mail } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_BACKEND_URL;
 
-const AdminLogin = () => {
+const socket = io(import.meta.env.VITE_BACKEND_URL, {
+  transports: ['polling', 'websocket'], // Polling works better on strict mobile networks
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 2000,
+});
+
+// ADDED: Accept setIsAuthenticated as a prop
+const AdminLogin = ({ setIsAuthenticated }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -26,9 +34,16 @@ const AdminLogin = () => {
       const data = await res.json();
 
       if (res.ok) {
-        localStorage.setItem('adminToken', data.token);
-        localStorage.setItem('adminSportAccess', data.sportAccess);
+        // CRITICAL FIX: Ensure these keys match App.jsx exactly
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('sportAccess', data.sportAccess);
         localStorage.setItem('adminName', data.name);
+        
+        // ADDED: Tell the global app state that we are logged in
+        if (setIsAuthenticated) {
+          setIsAuthenticated(true);
+        }
+        
         navigate('/admin'); 
       } else {
         setError(data.error || 'Invalid email or password. Please try again.');

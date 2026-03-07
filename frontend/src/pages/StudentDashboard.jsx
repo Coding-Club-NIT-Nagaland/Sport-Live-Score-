@@ -7,7 +7,12 @@ import { useWindowSize } from 'react-use';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 const API_URL = import.meta.env.VITE_BACKEND_URL;
-const socket = io(API_URL);
+const socket = io(API_URL, {
+  transports: ['polling', 'websocket'],
+  reconnection: true,
+  reconnectionAttempts: 5,
+  reconnectionDelay: 2000,
+});
 
 const HOUSES = ['Grey House (Wolves)', 'Black House (Panthers)', 'Red House (Ravens)', 'Yellow House (Masters & PhD)', 'Blue House (Orca)'];
 
