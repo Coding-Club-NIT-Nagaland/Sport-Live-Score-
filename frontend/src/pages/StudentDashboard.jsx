@@ -22,43 +22,34 @@ const SPORTS_CONFIG = {
 };
 
 // --- FRONTEND STANDINGS CALCULATOR ---
-// This guarantees the Points Table works perfectly even if the backend endpoint fails.
 const calculateStandings = (matchesData) => {
   const standings = {};
   matchesData.forEach(m => {
-     if(m.status !== 'Completed' || !m.teamB) return;
-     if(m.sport === 'Cricket' || m.sport === 'Athletics') return; // Handled separately
-     
+     if(m.status !== 'Completed' || !m.teamB || m.sport === 'Cricket') return;
      if(!standings[m.sport]) standings[m.sport] = {};
      const group = m.group || 'Group Stage';
      if(!standings[m.sport][group]) standings[m.sport][group] = {};
      
-     const initTeam = (teamName) => {
-        if(!standings[m.sport][group][teamName]) {
-           standings[m.sport][group][teamName] = { team: teamName, p: 0, w: 0, l: 0, d: 0, pts: 0 };
-        }
-     };
-     
-     initTeam(m.teamA);
-     initTeam(m.teamB);
-     
-     const tA = standings[m.sport][group][m.teamA];
-     const tB = standings[m.sport][group][m.teamB];
-     
-     tA.p += 1; tB.p += 1; // Increment Matches Played
-     
-     // 3 Points for Win, 1 for Draw, 0 for Loss
-     if (m.winner === m.teamA) { tA.w += 1; tB.l += 1; tA.pts += 3; }
-     else if (m.winner === m.teamB) { tB.w += 1; tA.l += 1; tB.pts += 3; }
-     else { tA.d += 1; tB.d += 1; tA.pts += 1; tB.pts += 1; } 
+     const initTeam = (n) => { if(!standings[m.sport][group][n]) standings[m.sport][group][n] = { team: n, p:0, w:0, l:0, d:0, pts:0 }; };
+     initTeam(m.teamA); initTeam(m.teamB);
+     const tA = standings[m.sport][group][m.teamA]; const tB = standings[m.sport][group][m.teamB];
+     tA.p++; tB.p++;
+
+     const type = (m.sport === 'Football' || m.sport === 'Futsal') ? 'goals' : 'points';
+     const sA = m.scoreA?.[type] || 0; const sB = m.scoreB?.[type] || 0;
+
+     // Math-aware logic: Trust 'winner' string if set, otherwise calculate from scores
+     if (m.winner === m.teamA || (sA > sB && !m.winner)) { tA.w++; tB.l++; tA.pts+=3; }
+     else if (m.winner === m.teamB || (sB > sA && !m.winner)) { tB.w++; tA.l++; tB.pts+=3; }
+     else { tA.d++; tB.d++; tA.pts++; tB.pts++; }
   });
-  
-  // Convert into array format for the table
+
+  // Convert object structure into sorted arrays for the table
   const formatted = {};
   Object.keys(standings).forEach(sport => {
     formatted[sport] = {};
     Object.keys(standings[sport]).forEach(group => {
-       formatted[sport][group] = Object.values(standings[sport][group]);
+       formatted[sport][group] = Object.values(standings[sport][group]).sort((a,b) => b.pts - a.pts || b.w - a.w);
     });
   });
   return formatted;
@@ -107,26 +98,36 @@ const StudentDashboard = () => {
       const matchesData = await resM.json();
       setMatches(matchesData);
       
-      // FIX: Auto-calculate table directly from matches to guarantee it shows
-      setPointsTable(calculateStandings(matchesData));
-
       const hData = await resH.json();
       const defaultHouses = HOUSES.map(name => ({ name, points: 0 }));
       setLeaderboard(hData.length > 0 ? hData : defaultHouses);
     } catch (err) { console.error(err); }
   };
 
+  // FIXED: Standardize state management. 
+  // Recalculate Standings whenever the 'matches' state updates to prevent race conditions.
+  useEffect(() => {
+    if (matches.length > 0) {
+      setPointsTable(calculateStandings(matches));
+    }
+  }, [matches]);
+
   useEffect(() => {
     fetchData();
+    
+    // Live update listener
     socket.on('matchUpdated', (updatedMatch) => {
-      setMatches(prev => {
-        const newMatches = prev.map(m => m._id === updatedMatch._id ? updatedMatch : m);
-        setPointsTable(calculateStandings(newMatches)); // Instantly update table on live edits
-        return newMatches;
-      });
+      setMatches(prev => prev.map(m => m._id === updatedMatch._id ? updatedMatch : m));
     });
-    socket.on('matchesUpdated', fetchData); socket.on('leaderboardUpdated', fetchData);
-    return () => { socket.off('matchUpdated'); socket.off('matchesUpdated'); socket.off('leaderboardUpdated'); };
+    
+    socket.on('matchesUpdated', fetchData); 
+    socket.on('leaderboardUpdated', fetchData);
+    
+    return () => { 
+        socket.off('matchUpdated'); 
+        socket.off('matchesUpdated'); 
+        socket.off('leaderboardUpdated'); 
+    };
   }, []);
 
   const recentCompleted = matches.filter(m => m.status === 'Completed').slice(-3).map(m => m.winner ? `🏆 ${m.winner} wins ${m.sport}` : `🏆 ${m.sport} completed`);
@@ -200,7 +201,7 @@ const StudentDashboard = () => {
             </div>
           )}
 
-          {/* --- POINTS TABLE VIEW WITH L & D COLUMNS --- */}
+          {/* --- POINTS TABLE VIEW --- */}
           {activeTab === 'points table' && (
             <div className="space-y-6 md:space-y-8 w-full px-1">
               <div className="flex flex-wrap justify-center gap-2 md:gap-3 bg-slate-900/50 p-3 md:p-4 rounded-2xl md:rounded-3xl border border-slate-800 backdrop-blur-md">
@@ -251,7 +252,7 @@ const StudentDashboard = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {teams.sort((a,b) => b.pts - a.pts || b.w - a.w).map((t, i) => (
+                            {teams.map((t, i) => (
                               <tr key={i} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
                                 <td className="px-4 md:px-8 py-4 md:py-5 font-black text-white">{t.team}</td>
                                 <td className="px-2 md:px-3 py-4 md:py-5 text-center font-bold text-slate-400">{t.p}</td>
@@ -288,12 +289,12 @@ const StudentDashboard = () => {
                             tickLine={false} 
                             tick={{fill: '#94a3b8', fontSize: 12, fontWeight: 900}} 
                             interval={0} 
-                            tickFormatter={(value) => value.split(' ')[0]} 
+                            tickFormatter={(value) => value ? value.split(' ')[0] : ''} 
                           />
                           <Tooltip cursor={{fill: '#1e293b'}} contentStyle={{borderRadius: '1rem', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontWeight: 900}} />
                           <Bar dataKey="points" radius={[12, 12, 12, 12]} maxBarSize={60} label={{ position: 'top', fill: '#f8fafc', fontSize: 14, fontWeight: 900 }}>
                              {[...leaderboard].sort((a,b) => b.points - a.points).map((entry, index) => {
-                                const barColor = entry.name.includes('Red') ? '#ef4444' : entry.name.includes('Blue') ? '#5E9BFF' : entry.name.includes('Black') ? '#334155' : entry.name.includes('Yellow') ? '#FF9B54' : entry.name.includes('Grey') ? '#94a3b8' : '#cbd5e1';
+                                const barColor = entry?.name?.includes('Red') ? '#ef4444' : entry?.name?.includes('Blue') ? '#5E9BFF' : entry?.name?.includes('Black') ? '#334155' : entry?.name?.includes('Yellow') ? '#FF9B54' : entry?.name?.includes('Grey') ? '#94a3b8' : '#cbd5e1';
                                 return <Cell key={`cell-${index}`} fill={barColor} />;
                              })}
                           </Bar>
@@ -306,13 +307,13 @@ const StudentDashboard = () => {
               <div className="bg-slate-900/60 backdrop-blur-xl rounded-[2rem] md:rounded-[3rem] border border-slate-800 overflow-hidden shadow-2xl w-full">
                 <div className="bg-slate-800/50 text-[#5E9BFF] px-6 md:px-10 py-4 md:py-6 font-black uppercase text-[10px] md:text-xs tracking-[0.4em] text-center border-b border-slate-700">Final Rankings</div>
                 <ul className="divide-y divide-slate-800">
-                  {[...leaderboard].sort((a,b) => b.points - a.points).map((house, index) => (
+                  {leaderboard.length > 0 && [...leaderboard].sort((a,b) => b.points - a.points).map((house, index) => (
                     <li key={house._id || index} className="p-5 md:p-8 flex flex-row justify-between items-center hover:bg-slate-800/50 transition gap-3">
                       <div className="flex items-center gap-3 md:gap-8 flex-1">
                         <div className={`w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex shrink-0 items-center justify-center font-black text-sm md:text-lg shadow-sm border ${index === 0 ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.3)]' : index === 1 ? 'bg-slate-300/20 text-slate-300 border-slate-300/50' : 'bg-slate-800 text-slate-500 border-slate-700'}`}>
                           {index < 3 ? <Medal size={20} className="md:w-6 md:h-6"/> : `#${index+1}`}
                         </div>
-                        <p className="text-sm md:text-2xl font-black text-white uppercase tracking-tight leading-tight">{house.name.replace('House', '')}</p>
+                        <p className="text-sm md:text-2xl font-black text-white uppercase tracking-tight leading-tight">{house?.name?.replace('House', '')}</p>
                       </div>
                       <div className={`bg-blue-600/20 border border-blue-500/30 px-4 md:px-10 py-2.5 md:py-4 rounded-xl md:rounded-3xl text-center shadow-[0_0_20px_rgba(94,155,255,0.2)] shrink-0`}>
                         <p className="text-xl md:text-3xl font-black text-[#5E9BFF]">{house.points || 0}</p>

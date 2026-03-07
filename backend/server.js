@@ -35,7 +35,7 @@ app.use(helmet({
   },
 }));
 
-// DYNAMIC CORS ALLOWANCE (Fixes the Vercel Block)
+// DYNAMIC CORS ALLOWANCE
 const allowedOrigins = [
     process.env.FRONTEND_URL, 
     'http://localhost:5173',
@@ -44,7 +44,6 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow if no origin (mobile apps/curl), if in allowed array, OR if it's a Vercel deployment link
     if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
@@ -66,7 +65,6 @@ const loginLimiter = rateLimit({
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// Apply identical dynamic CORS rules to Socket.io
 const server = http.createServer(app);
 const io = new Server(server, { 
   cors: {
@@ -76,51 +74,18 @@ const io = new Server(server, {
   } 
 });
 
-// --- 2. MONGODB CONNECTION & SEEDER ---
-
+// --- 2. MONGODB CONNECTION ---
 const startDatabase = async () => {
   try {
     await connectDB();
     console.log("📂 Database Connected...");
-    await seedSecretaries(); 
   } catch (err) {
     console.error("❌ DB Connection Failed:", err.message);
   }
 };
-
 startDatabase();
 
-const seedSecretaries = async () => {
-  try {
-    const count = await Secretary.countDocuments();
-    if (count === 0) {
-      console.log("🌱 Database empty. Reading secretaries.json...");
-      const filePath = path.join(__dirname, 'data', 'secretaries.json');
-      
-      if (!fs.existsSync(filePath)) return;
-
-      const rawData = fs.readFileSync(filePath, 'utf-8');
-      const secretariesData = JSON.parse(rawData);
-      const salt = await bcrypt.genSalt(10);
-
-      const secretariesToInsert = await Promise.all(secretariesData.map(async (sec) => ({
-        name: sec.name,
-        email: sec.email.toLowerCase(),
-        password: await bcrypt.hash(sec.password, salt),
-        sportCategory: sec.sportCategory
-      })));
-
-      await Secretary.insertMany(secretariesToInsert);
-      console.log(`✅ Successfully seeded ${secretariesToInsert.length} Secretaries!`);
-    }
-  } catch (err) {
-    console.error("❌ Seeder Error:", err);
-  }
-};
-
 // --- 3. AUTH & RBAC MIDDLEWARE ---
-
-// REQUIRED: JWT_SECRET must be set in Render Environment Variables
 const getJwtSecret = () => {
   if (!process.env.JWT_SECRET) {
     console.error("🚨 FATAL ERROR: JWT_SECRET environment variable is missing!");
@@ -150,7 +115,6 @@ const hasSportAccess = (userAccess, targetSport) => {
 };
 
 // --- 4. API ROUTES ---
-
 app.get('/api/matches', async (req, res) => res.json(await Match.find().sort({ date: 1, time: 1 })));
 app.get('/api/houses', async (req, res) => res.json(await House.find().sort({ points: -1 })));
 
@@ -172,24 +136,16 @@ app.post('/api/admin/login', loginLimiter, async (req, res) => {
     if (!admin || !(await bcrypt.compare(password, admin.password))) {
       return res.status(401).json({ error: 'Invalid ID or Password' });
     }
-  
-    const token = jwt.sign(
-      { id: admin._id, sportAccess: admin.sportCategory }, 
-      getJwtSecret(), 
-      { expiresIn: '12h' }
-    );
-    
+    const token = jwt.sign({ id: admin._id, sportAccess: admin.sportCategory }, getJwtSecret(), { expiresIn: '12h' });
     res.json({ token, sportAccess: admin.sportCategory, name: admin.name });
   } catch (error) { res.status(500).json({ error: 'Login error' }); }
 });
 
-// ADDED: Crucial route for frontend session validation
 app.get('/api/admin/verify', verifyToken, (req, res) => {
   res.status(200).json({ valid: true, user: req.user });
 });
 
 // --- 5. PROTECTED MATCH ROUTES ---
-
 app.post('/api/matches', verifyToken, async (req, res) => {
   if (!hasSportAccess(req.user.sportAccess, req.body.sport)) return res.status(403).json({ error: 'Unauthorized' });
   const newMatch = await Match.create(req.body);
@@ -200,27 +156,51 @@ app.post('/api/matches', verifyToken, async (req, res) => {
 app.put('/api/matches/:id', verifyToken, async (req, res) => {
   const matchCheck = await Match.findById(req.params.id);
   if (!matchCheck || !hasSportAccess(req.user.sportAccess, matchCheck.sport)) return res.status(403).json({ error: 'Unauthorized' });
-  
-  // FIXED: Replaced { new: true } with { returnDocument: 'after' } to clear Mongoose warning
   const match = await Match.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
   io.emit('matchUpdated', match);
   res.json(match);
 });
 
+// UPGRADED: Math-Aware Resolve Route
 app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
     if (!match || !hasSportAccess(req.user.sportAccess, match.sport)) return res.status(403).json({ error: "Unauthorized." });
 
-    const { overallHousePoints, winnerOverride } = req.body;
+    const { overallHousePoints, winnerOverride, resultSummary } = req.body;
+
+    // AUTO-CALCULATE WINNER FROM SCORES
+    let finalWinner = winnerOverride || match.winner;
+    let finalSummary = resultSummary || match.resultSummary;
+
+    if (match.teamB && match.sport !== 'Cricket') {
+       const scoreType = (match.sport === 'Football' || match.sport === 'Futsal') ? 'goals' : 'points';
+       const scoreA = match.scoreA?.[scoreType] || 0;
+       const scoreB = match.scoreB?.[scoreType] || 0;
+
+       if (!winnerOverride) { 
+           if (scoreA > scoreB) {
+              finalWinner = match.teamA;
+              if (!resultSummary) finalSummary = `${match.teamA} won by ${scoreA - scoreB} ${scoreType}`;
+           } else if (scoreB > scoreA) {
+              finalWinner = match.teamB;
+              if (!resultSummary) finalSummary = `${match.teamB} won by ${scoreB - scoreA} ${scoreType}`;
+           } else {
+              finalWinner = "Draw";
+              if (!resultSummary) finalSummary = `Match Draw (${scoreA}-${scoreB})`;
+           }
+       }
+    }
+
     match.status = 'Completed';
-    match.winner = winnerOverride || match.winner;
+    match.winner = finalWinner;
+    match.resultSummary = finalSummary;
+    match.isTimerRunning = false;
     await match.save();
 
     if (overallHousePoints && Array.isArray(overallHousePoints)) {
       for (const hp of overallHousePoints) {
         if (hp.points > 0) {
-          // FIXED: Replaced { new: true } with { returnDocument: 'after' }
           await House.findOneAndUpdate(
             { name: hp.name },
             { $inc: { points: Number(hp.points) } },
@@ -246,6 +226,5 @@ app.delete('/api/matches/:id', verifyToken, async (req, res) => {
   res.status(403).json({ error: "Unauthorized." });
 });
 
-// --- START SERVER ---
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
