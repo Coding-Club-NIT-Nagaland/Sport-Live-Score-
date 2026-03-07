@@ -21,6 +21,49 @@ const SPORTS_CONFIG = {
   'Badminton': { hasServe: true }, 'Table Tennis': { hasServe: true }
 };
 
+// --- FRONTEND STANDINGS CALCULATOR ---
+// This guarantees the Points Table works perfectly even if the backend endpoint fails.
+const calculateStandings = (matchesData) => {
+  const standings = {};
+  matchesData.forEach(m => {
+     if(m.status !== 'Completed' || !m.teamB) return;
+     if(m.sport === 'Cricket' || m.sport === 'Athletics') return; // Handled separately
+     
+     if(!standings[m.sport]) standings[m.sport] = {};
+     const group = m.group || 'Group Stage';
+     if(!standings[m.sport][group]) standings[m.sport][group] = {};
+     
+     const initTeam = (teamName) => {
+        if(!standings[m.sport][group][teamName]) {
+           standings[m.sport][group][teamName] = { team: teamName, p: 0, w: 0, l: 0, d: 0, pts: 0 };
+        }
+     };
+     
+     initTeam(m.teamA);
+     initTeam(m.teamB);
+     
+     const tA = standings[m.sport][group][m.teamA];
+     const tB = standings[m.sport][group][m.teamB];
+     
+     tA.p += 1; tB.p += 1; // Increment Matches Played
+     
+     // 3 Points for Win, 1 for Draw, 0 for Loss
+     if (m.winner === m.teamA) { tA.w += 1; tB.l += 1; tA.pts += 3; }
+     else if (m.winner === m.teamB) { tB.w += 1; tA.l += 1; tB.pts += 3; }
+     else { tA.d += 1; tB.d += 1; tA.pts += 1; tB.pts += 1; } 
+  });
+  
+  // Convert into array format for the table
+  const formatted = {};
+  Object.keys(standings).forEach(sport => {
+    formatted[sport] = {};
+    Object.keys(standings[sport]).forEach(group => {
+       formatted[sport][group] = Object.values(standings[sport][group]);
+    });
+  });
+  return formatted;
+};
+
 const calculateCurrentTime = (match) => {
   if (!match.isTimerRunning) return match.timerElapsed || 0;
   const now = new Date().getTime();
@@ -60,8 +103,13 @@ const StudentDashboard = () => {
 
   const fetchData = async () => {
     try {
-      const [resM, resP, resH] = await Promise.all([ fetch(`${API_URL}/api/matches`), fetch(`${API_URL}/api/points-table`), fetch(`${API_URL}/api/houses`) ]);
-      setMatches(await resM.json()); setPointsTable(await resP.json());
+      const [resM, resH] = await Promise.all([ fetch(`${API_URL}/api/matches`), fetch(`${API_URL}/api/houses`) ]);
+      const matchesData = await resM.json();
+      setMatches(matchesData);
+      
+      // FIX: Auto-calculate table directly from matches to guarantee it shows
+      setPointsTable(calculateStandings(matchesData));
+
       const hData = await resH.json();
       const defaultHouses = HOUSES.map(name => ({ name, points: 0 }));
       setLeaderboard(hData.length > 0 ? hData : defaultHouses);
@@ -70,9 +118,15 @@ const StudentDashboard = () => {
 
   useEffect(() => {
     fetchData();
-    socket.on('matchUpdated', (updatedMatch) => setMatches(prev => prev.map(m => m._id === updatedMatch._id ? updatedMatch : m)));
-    socket.on('matchesUpdated', fetchData); socket.on('pointsTableUpdated', fetchData); socket.on('leaderboardUpdated', fetchData);
-    return () => { socket.off('matchUpdated'); socket.off('matchesUpdated'); socket.off('pointsTableUpdated'); socket.off('leaderboardUpdated'); };
+    socket.on('matchUpdated', (updatedMatch) => {
+      setMatches(prev => {
+        const newMatches = prev.map(m => m._id === updatedMatch._id ? updatedMatch : m);
+        setPointsTable(calculateStandings(newMatches)); // Instantly update table on live edits
+        return newMatches;
+      });
+    });
+    socket.on('matchesUpdated', fetchData); socket.on('leaderboardUpdated', fetchData);
+    return () => { socket.off('matchUpdated'); socket.off('matchesUpdated'); socket.off('leaderboardUpdated'); };
   }, []);
 
   const recentCompleted = matches.filter(m => m.status === 'Completed').slice(-3).map(m => m.winner ? `🏆 ${m.winner} wins ${m.sport}` : `🏆 ${m.sport} completed`);
@@ -114,7 +168,7 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* TAB NAVIGATION (SCROLLABLE ON MOBILE) */}
+        {/* TAB NAVIGATION */}
         <div className="flex justify-start lg:justify-center overflow-x-auto gap-2 border-b border-slate-800 pb-px hide-scrollbar w-full px-2">
           {[
             { id: 'live', label: 'Live', icon: <Activity size={16}/> },
@@ -146,7 +200,7 @@ const StudentDashboard = () => {
             </div>
           )}
 
-          {/* --- POINTS TABLE VIEW --- */}
+          {/* --- POINTS TABLE VIEW WITH L & D COLUMNS --- */}
           {activeTab === 'points table' && (
             <div className="space-y-6 md:space-y-8 w-full px-1">
               <div className="flex flex-wrap justify-center gap-2 md:gap-3 bg-slate-900/50 p-3 md:p-4 rounded-2xl md:rounded-3xl border border-slate-800 backdrop-blur-md">
@@ -180,16 +234,32 @@ const StudentDashboard = () => {
                   ) : <div className="py-16 md:py-20 text-center text-slate-500 font-black uppercase tracking-widest text-[9px] md:text-[10px]">No Athletics results recorded yet</div>}
                 </div>
               ) : pointsTable[selectedSport] ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 w-full">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8 w-full">
                   {Object.entries(pointsTable[selectedSport]).map(([group, teams]) => (
                     <div key={group} className="bg-slate-900/50 rounded-[1.5rem] md:rounded-[2rem] border border-slate-800 overflow-hidden backdrop-blur-md w-full">
                       <div className="bg-slate-800/80 text-[#5E9BFF] px-5 py-3 md:px-8 md:py-4 font-black uppercase text-[9px] md:text-[10px] tracking-[0.3em] border-b border-slate-700">{group}</div>
                       <div className="overflow-x-auto w-full">
-                        <table className="w-full text-left text-xs md:text-sm whitespace-nowrap min-w-[300px]">
-                          <thead className="bg-slate-900/50 font-black text-[9px] md:text-[10px] uppercase text-slate-500"><tr><th className="px-4 md:px-8 py-3 md:py-5">House</th><th className="px-3 md:px-4 text-center">P</th><th className="px-3 md:px-4 text-center text-emerald-400">W</th><th className="px-4 md:px-8 text-center text-[#5E9BFF]">Pts</th></tr></thead>
+                        <table className="w-full text-left text-xs md:text-sm whitespace-nowrap min-w-[450px]">
+                          <thead className="bg-slate-900/50 font-black text-[9px] md:text-[10px] uppercase text-slate-500">
+                            <tr>
+                              <th className="px-4 md:px-8 py-3 md:py-5">House</th>
+                              <th className="px-2 md:px-3 text-center" title="Played">P</th>
+                              <th className="px-2 md:px-3 text-center text-emerald-400" title="Won">W</th>
+                              <th className="px-2 md:px-3 text-center text-rose-400" title="Lost">L</th>
+                              <th className="px-2 md:px-3 text-center text-slate-400" title="Draw">D</th>
+                              <th className="px-4 md:px-8 text-center text-[#5E9BFF]" title="Points">Pts</th>
+                            </tr>
+                          </thead>
                           <tbody>
-                            {teams.sort((a,b) => b.pts - a.pts).map((t, i) => (
-                              <tr key={i} className="border-t border-slate-800 hover:bg-slate-800/50 transition"><td className="px-4 md:px-8 py-4 md:py-5 font-black text-white">{t.team}</td><td className="px-3 md:px-4 py-4 md:py-5 text-center font-bold text-slate-400">{t.p}</td><td className="px-3 md:px-4 py-4 md:py-5 text-center text-emerald-400 font-black">{t.w}</td><td className="px-4 md:px-8 py-4 md:py-5 text-center font-black bg-blue-900/20 text-[#5E9BFF]">{t.pts}</td></tr>
+                            {teams.sort((a,b) => b.pts - a.pts || b.w - a.w).map((t, i) => (
+                              <tr key={i} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
+                                <td className="px-4 md:px-8 py-4 md:py-5 font-black text-white">{t.team}</td>
+                                <td className="px-2 md:px-3 py-4 md:py-5 text-center font-bold text-slate-400">{t.p}</td>
+                                <td className="px-2 md:px-3 py-4 md:py-5 text-center text-emerald-400 font-black">{t.w}</td>
+                                <td className="px-2 md:px-3 py-4 md:py-5 text-center text-rose-400 font-black">{t.l}</td>
+                                <td className="px-2 md:px-3 py-4 md:py-5 text-center text-slate-400 font-bold">{t.d}</td>
+                                <td className="px-4 md:px-8 py-4 md:py-5 text-center font-black bg-blue-900/20 text-[#5E9BFF]">{t.pts}</td>
+                              </tr>
                             ))}
                           </tbody>
                         </table>
@@ -211,23 +281,16 @@ const StudentDashboard = () => {
                    <div className="min-w-[400px]">
                      <ResponsiveContainer width="100%" height={300}>
                         <BarChart data={[...leaderboard].sort((a,b) => b.points - a.points)} margin={{ top: 30, right: 10, left: 10, bottom: 5 }}>
-                          
-                          {/* FIX 1: Hidden Y-Axis keeps the chart centered */}
                           <YAxis hide />
-                          
-                          {/* FIX 2: tickFormatter shortens the name so they don't overlap */}
                           <XAxis 
                             dataKey="name" 
                             axisLine={false} 
                             tickLine={false} 
                             tick={{fill: '#94a3b8', fontSize: 12, fontWeight: 900}} 
                             interval={0} 
-                            tickFormatter={(value) => value.split(' ')[0]} // Turns "Grey House (Wolves)" into "Grey"
+                            tickFormatter={(value) => value.split(' ')[0]} 
                           />
-                          
                           <Tooltip cursor={{fill: '#1e293b'}} contentStyle={{borderRadius: '1rem', border: '1px solid #334155', backgroundColor: '#0f172a', color: 'white', fontWeight: 900}} />
-                          
-                          {/* FIX 3: Added a label to show points above the bars */}
                           <Bar dataKey="points" radius={[12, 12, 12, 12]} maxBarSize={60} label={{ position: 'top', fill: '#f8fafc', fontSize: 14, fontWeight: 900 }}>
                              {[...leaderboard].sort((a,b) => b.points - a.points).map((entry, index) => {
                                 const barColor = entry.name.includes('Red') ? '#ef4444' : entry.name.includes('Blue') ? '#5E9BFF' : entry.name.includes('Black') ? '#334155' : entry.name.includes('Yellow') ? '#FF9B54' : entry.name.includes('Grey') ? '#94a3b8' : '#cbd5e1';
@@ -319,26 +382,36 @@ const StudentMatchCard = ({ match }) => {
             )}
           </div>
         ) : match.teamB ? (
-          <div className="flex justify-between items-center text-center w-full">
-            <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative">
-              {hasServe && match.servingTeam === 'A' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
-              <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight truncate ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>
-                {match.teamA}
-                {isFinished && match.winner === match.teamA && <Trophy size={8} className="inline ml-1 text-yellow-400 md:w-2.5 md:h-2.5" />}
-              </h3>
-              {match.status !== 'Upcoming' && <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreA?.[scoreType] || 0}</div>}
-              {match.scoreA?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreA.sets}</span>}
+          <div className="flex flex-col w-full">
+            <div className="flex justify-between items-center text-center w-full">
+              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative">
+                {hasServe && match.servingTeam === 'A' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
+                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight truncate ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>
+                  {match.teamA}
+                </h3>
+                {match.status !== 'Upcoming' && <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreA?.[scoreType] || 0}</div>}
+                {match.scoreA?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreA.sets}</span>}
+              </div>
+              <div className="w-[10%] md:w-2/12 text-[8px] md:text-[10px] font-black text-slate-600 uppercase italic">VS</div>
+              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative">
+                {hasServe && match.servingTeam === 'B' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
+                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight truncate ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>
+                  {match.teamB}
+                </h3>
+                {match.status !== 'Upcoming' && <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreB?.[scoreType] || 0}</div>}
+                {match.scoreB?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreB.sets}</span>}
+              </div>
             </div>
-            <div className="w-[10%] md:w-2/12 text-[8px] md:text-[10px] font-black text-slate-600 uppercase italic">VS</div>
-            <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative">
-              {hasServe && match.servingTeam === 'B' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
-              <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight truncate ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>
-                {match.teamB}
-                {isFinished && match.winner === match.teamB && <Trophy size={8} className="inline ml-1 text-yellow-400 md:w-2.5 md:h-2.5" />}
-              </h3>
-              {match.status !== 'Upcoming' && <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreB?.[scoreType] || 0}</div>}
-              {match.scoreB?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreB.sets}</span>}
-            </div>
+            
+            {/* FIX: Winner Banner strictly for Head-to-Head */}
+            {isFinished && (match.winner || match.resultSummary) && (
+              <div className="mt-4 pt-3 md:pt-4 border-t border-slate-800 text-center w-full">
+                 <p className="text-[#5E9BFF] font-black text-[10px] md:text-xs uppercase tracking-tight">
+                    {match.winner ? `${match.winner} WON` : 'MATCH DRAW / FINISHED'}
+                 </p>
+                 {match.resultSummary && <p className="text-slate-400 text-[8px] md:text-[10px] font-bold uppercase tracking-widest mt-1">{match.resultSummary}</p>}
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-center py-4 md:py-6 bg-slate-800/50 rounded-xl md:rounded-2xl border border-slate-700 w-full">
