@@ -8,6 +8,8 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
+const helmet = require('helmet'); // ADDED: Security headers
+const rateLimit = require('express-rate-limit'); // ADDED: DDOS/Brute force protection
 
 const connectDB = require('./config/DB');
 
@@ -18,25 +20,79 @@ const TeamStat = require('./models/TeamStat');
 const House = require('./models/House');
 
 const app = express();
-app.use(cors());
+
+// --- 1. PRODUCTION SECURITY MIDDLEWARE ---
+
+// Security Headers (CSP, XSS, etc.)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      "default-src": ["'self'"],
+      // Allow connections to your frontend URL and Render websocket
+      "connect-src": ["'self'", process.env.FRONTEND_URL, "wss://" + (process.env.RENDER_EXTERNAL_HOSTNAME || "localhost:5000")],
+      "img-src": ["'self'", "data:"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "script-src": ["'self'"],
+    },
+  },
+}));
+
+// Dynamic CORS using Environment Variables
+const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:5173'];
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Blocked by Security Policy (CORS)'));
+    }
+  },
+  credentials: true
+}));
+
 app.use(express.json());
 
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-
-// --- 1. MONGODB CONNECTION & JSON SEEDER ---
-connectDB();
-
-mongoose.connection.once('open', () => {
-  seedSecretaries(); 
+// Login Rate Limiter (Prevents Brute Force)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, 
+  max: 10, 
+  message: { error: "Too many login attempts. Please try again later." }
 });
+
+// Prevent 404/CSP errors for favicon on API calls
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+const server = http.createServer(app);
+const io = new Server(server, { 
+  cors: { 
+    origin: allowedOrigins,
+    methods: ["GET", "POST"]
+  } 
+});
+
+// --- 2. MONGODB CONNECTION & SEEDER ---
+
+const startDatabase = async () => {
+  try {
+    await connectDB();
+    console.log("📂 Database Connected...");
+    // Only start seeding after connection is fully established
+    seedSecretaries(); 
+  } catch (err) {
+    console.error("❌ DB Connection Failed:", err);
+    process.exit(1);
+  }
+};
+
+startDatabase();
+
 const seedSecretaries = async () => {
   try {
     const count = await Secretary.countDocuments();
     if (count === 0) {
       console.log("🌱 Database empty. Reading secretaries.json...");
       
-      const filePath = path.join(__dirname, './data/secretaries.json');
+      const filePath = path.join(__dirname, 'data', 'secretaries.json');
       
       if (!fs.existsSync(filePath)) {
         console.warn("⚠️ secretaries.json not found. Skipping seeder.");
@@ -46,20 +102,16 @@ const seedSecretaries = async () => {
       const rawData = fs.readFileSync(filePath, 'utf-8');
       const secretariesData = JSON.parse(rawData);
 
-      const secretariesToInsert = [];
       const salt = await bcrypt.genSalt(10);
-      for (const sec of secretariesData) {
-        const hashedPassword = await bcrypt.hash(sec.password, salt);
-        secretariesToInsert.push({
-          name: sec.name,
-          email: sec.email.toLowerCase(),
-          password: hashedPassword,
-          sportCategory: sec.sportCategory
-        });
-      }
+      const secretariesToInsert = await Promise.all(secretariesData.map(async (sec) => ({
+        name: sec.name,
+        email: sec.email.toLowerCase(),
+        password: await bcrypt.hash(sec.password, salt),
+        sportCategory: sec.sportCategory
+      })));
 
       await Secretary.insertMany(secretariesToInsert);
-      console.log(`✅ Successfully seeded ${secretariesToInsert.length} Secretaries from JSON!`);
+      console.log(`✅ Successfully seeded ${secretariesToInsert.length} Secretaries!`);
     } else {
       console.log(`✅ Database already contains ${count} Secretaries. Skipping seeder.`);
     }
@@ -68,7 +120,7 @@ const seedSecretaries = async () => {
   }
 };
 
-// --- 2. AUTH MIDDLEWARE (WITH RBAC USER ATTACHMENT) ---
+// --- 3. AUTH MIDDLEWARE (WITH RBAC USER ATTACHMENT) ---
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(403).json({ error: 'Access Denied. No token provided.' });
@@ -80,6 +132,7 @@ const verifyToken = (req, res, next) => {
     next();
   });
 };
+
 const hasSportAccess = (userAccess, targetSport) => {
   if (userAccess === 'All') return true;
   const SPORT_GROUPS = {
@@ -89,6 +142,8 @@ const hasSportAccess = (userAccess, targetSport) => {
   const allowedSports = SPORT_GROUPS[userAccess] || [userAccess];
   return allowedSports.includes(targetSport);
 };
+
+// --- 4. PUBLIC API ROUTES ---
 app.get('/api/matches', async (req, res) => {
   res.json(await Match.find().sort({ date: 1, time: 1 }));
 });
@@ -109,7 +164,7 @@ app.get('/api/points-table', async (req, res) => {
 });
 
 // --- ADMIN LOGIN ---
-app.post('/api/admin/login', async (req, res) => {
+app.post('/api/admin/login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
   
@@ -136,43 +191,35 @@ app.post('/api/admin/login', async (req, res) => {
   }
 });
 
-// --- 4. PROTECTED ADMIN ROUTES WITH RBAC ---
+// --- 5. PROTECTED ADMIN ROUTES WITH RBAC ---
 
-// Schedule Match
 app.post('/api/matches', verifyToken, async (req, res) => {
   if (!hasSportAccess(req.user.sportAccess, req.body.sport)) {
     return res.status(403).json({ error: `Unauthorized. You can only manage ${req.user.sportAccess} matches.` });
   }
-
   const newMatch = await Match.create(req.body);
   io.emit('matchesUpdated');
   res.json(newMatch);
 });
 
-// Update Live Match (Scores, Timers, Serves, Corrections)
 app.put('/api/matches/:id', verifyToken, async (req, res) => {
   const matchCheck = await Match.findById(req.params.id);
   if (!matchCheck) return res.status(404).json({ error: 'Match not found' });
-
   if (!hasSportAccess(req.user.sportAccess, matchCheck.sport)) {
     return res.status(403).json({ error: `Unauthorized to edit ${matchCheck.sport}.` });
   }
-
   const match = await Match.findByIdAndUpdate(req.params.id, req.body, { new: true });
   io.emit('matchUpdated', match);
   res.json(match);
 });
 
-// Forfeit Match
 app.put('/api/matches/:id/forfeit', verifyToken, async (req, res) => {
   const { winner } = req.body;
   const match = await Match.findById(req.params.id);
   if (!match) return res.status(404).json({ error: 'Match not found' });
-
   if (!hasSportAccess(req.user.sportAccess, match.sport)) {
     return res.status(403).json({ error: "Unauthorized." });
   }
-
   match.status = 'Completed';
   match.winner = winner;
   match.resultSummary = "Match Forfeited";
@@ -191,22 +238,17 @@ app.put('/api/matches/:id/forfeit', verifyToken, async (req, res) => {
     await updateStat(winner, true);
     await updateStat(match.teamA === winner ? match.teamB : match.teamA, false);
   }
-  
   io.emit('matchUpdated', match);
   io.emit('pointsTableUpdated');
   res.json(match);
 });
 
-// Delete Match
 app.delete('/api/matches/:id', verifyToken, async (req, res) => {
   try {
     const matchCheck = await Match.findById(req.params.id);
-    if (!matchCheck) return res.status(404).json({ error: 'Match not found' });
-
-    if (!hasSportAccess(req.user.sportAccess, matchCheck.sport)) {
+    if (!matchCheck || !hasSportAccess(req.user.sportAccess, matchCheck.sport)) {
       return res.status(403).json({ error: "Unauthorized." });
     }
-
     await Match.findByIdAndDelete(req.params.id);
     io.emit('matchesUpdated'); 
     res.json({ message: 'Match deleted successfully' });
@@ -215,19 +257,13 @@ app.delete('/api/matches/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Resolve/Finalize Match
 app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
   const { penaltiesA, penaltiesB, overallHousePoints, resultSummary, winnerOverride, isTimerRunning } = req.body;
-  
   try {
     const match = await Match.findById(req.params.id);
-    if (!match) return res.status(404).json({ error: 'Match not found' });
-
-    if (!hasSportAccess(req.user.sportAccess, match.sport)) {
+    if (!match || !hasSportAccess(req.user.sportAccess, match.sport)) {
       return res.status(403).json({ error: "Unauthorized." });
     }
-
-    // 1. Basic match updates
     match.status = 'Completed';
     match.penaltiesA = penaltiesA || 0;
     match.penaltiesB = penaltiesB || 0;
@@ -241,7 +277,6 @@ app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
     if (!winner && !isAthletics && match.sport !== 'Cricket') {
       const sA = match.scoreA;
       const sB = match.scoreB;
-
       if (match.sport === 'Football' || match.sport === 'Futsal') {
         if (sA.goals > sB.goals) winner = match.teamA;
         else if (sB.goals > sA.goals) winner = match.teamB;
@@ -260,25 +295,20 @@ app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
     match.winner = winner;
     await match.save();
 
-    const isGroupStage = ['Group A', 'Group B', 'Group C'].includes(match.group);
-    
-    if (isGroupStage && !isAthletics) {
+    if (['Group A', 'Group B', 'Group C'].includes(match.group) && !isAthletics) {
       const updateStat = async (teamName, isWin, isTie) => {
         let stat = await TeamStat.findOne({ team: teamName, sport: match.sport, group: match.group });
         if (!stat) stat = new TeamStat({ team: teamName, sport: match.sport, group: match.group });
-        
         stat.p += 1;
         if (isWin) { stat.w += 1; stat.pts += 3; } 
         else if (isTie) { stat.d += 1; stat.pts += 1; } 
         else { stat.l += 1; }
         await stat.save();
       };
-
       await updateStat(match.teamA, winner === match.teamA, isDraw);
       await updateStat(match.teamB, winner === match.teamB, isDraw);
     }
 
-    // Update Overall House Championship (Main Leaderboard)
     if (overallHousePoints && Array.isArray(overallHousePoints)) {
       for (const hp of overallHousePoints) {
         if (hp.points && Number(hp.points) > 0) {
@@ -291,14 +321,10 @@ app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
       }
       io.emit('leaderboardUpdated'); 
     }
-
     io.emit('matchUpdated', match);
     io.emit('pointsTableUpdated');
-    
     res.json(match);
-
   } catch (error) {
-    console.error("Resolve Error:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
