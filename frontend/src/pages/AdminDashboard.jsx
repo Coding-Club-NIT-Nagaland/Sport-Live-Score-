@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Trophy, Calendar, PlusCircle, Medal, LogOut, Flag, Minus, Plus, Trash2, CheckCircle, X, Search, Play, Pause, RotateCcw, CircleDot, Edit3, AlertTriangle, ShieldCheck, UserCircle } from "lucide-react";
 import { io } from "socket.io-client";
 
@@ -56,13 +57,17 @@ const LiveClock = ({ match }) => {
   return <span className="font-mono tabular-nums text-lg">{mins}:{secs}</span>;
 };
 
-const AdminDashboard = () => {
+const AdminDashboard = ({ setIsAuthenticated }) => {
   const [activeTab, setActiveTab] = useState("live");
   const [matches, setMatches] = useState([]);
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [alert, setAlert] = useState({ show: false, message: "", type: "" });
-  
-  const adminSportAccess = localStorage.getItem('adminSportAccess') || 'All';
+  const navigate = useNavigate(); 
+
+  // --- STRICT RBAC SECURITY CHECK ---
+  // Grabs the token and explicitly prevents a null value from defaulting to 'All'
+  const rawAccess = localStorage.getItem('sportAccess') || localStorage.getItem('adminSportAccess');
+  const adminSportAccess = (rawAccess && rawAccess !== "undefined") ? rawAccess : 'Restricted';
   const adminName = localStorage.getItem('adminName') || 'Council Member';
 
   const SPORT_ALIASES = {
@@ -70,13 +75,16 @@ const AdminDashboard = () => {
     'Fitness': ['Tug of War', 'Kho-Kho', 'Marathon', 'High Jump', 'Long Jump', 'Skipping', 'Shotput']
   };
 
+  // Securely build the allowed sports list
   let allowedSports = [];
   if (adminSportAccess === 'All') {
-    allowedSports = Object.keys(SPORTS_CONFIG);
+    allowedSports = Object.keys(SPORTS_CONFIG); // Only General Secretary gets this
   } else if (SPORT_ALIASES[adminSportAccess]) {
     allowedSports = SPORT_ALIASES[adminSportAccess];
+  } else if (SPORTS_CONFIG[adminSportAccess]) {
+    allowedSports = [adminSportAccess]; // e.g. strictly ['Football']
   } else {
-    allowedSports = [adminSportAccess];
+    allowedSports = ["Restricted Access"]; // Failsafe
   }
 
   const [resolvingMatch, setResolvingMatch] = useState(null);
@@ -88,9 +96,15 @@ const AdminDashboard = () => {
   const [editingMatch, setEditingMatch] = useState(null);
   const [editForm, setEditForm] = useState({ scoreA: 0, scoreB: 0, setsA: 0, setsB: 0, winner: '', resultSummary: '' });
 
+  // Safely initialize the form based on actual allowed sports
+  const defaultSport = allowedSports[0] !== "Restricted Access" ? allowedSports[0] : "";
   const [newMatch, setNewMatch] = useState({
-    sport: allowedSports[0], category: SPORTS_CONFIG[allowedSports[0]]?.categories[0], group: "Group A",
-    teamA: HOUSE_TEAMS[0], teamB: HOUSE_TEAMS[2], date: "", time: "", cricHeroesLink: "",
+    sport: defaultSport, 
+    category: SPORTS_CONFIG[defaultSport]?.categories[0] || "", 
+    group: "Group A",
+    teamA: HOUSE_TEAMS[0], 
+    teamB: HOUSE_TEAMS[2], 
+    date: "", time: "", cricHeroesLink: "",
   });
 
   const fetchMatches = async () => {
@@ -113,13 +127,15 @@ const AdminDashboard = () => {
   };
 
   const apiCall = async (endpoint, method, body) => {
-    const token = localStorage.getItem("adminToken");
+    const token = localStorage.getItem("token") || localStorage.getItem("adminToken");
     try {
       const res = await fetch(`${API_URL}/api/${endpoint}`, {
         method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(body)
       });
+      
       if (res.status === 401 || res.status === 403) {
-        localStorage.removeItem("adminToken"); window.location.href = "/admin-login"; return null;
+        handleLogout();
+        return null;
       }
       return await res.json();
     } catch (err) { return null; }
@@ -228,12 +244,29 @@ const AdminDashboard = () => {
 
   const displayMatches = matches.filter(m => m.status === getStatusFilter() && (adminSportAccess === 'All' || allowedSports.includes(m.sport)));
 
+  // Completely wipe local storage on logout to fix caching issues
   const handleLogout = () => {
-    localStorage.removeItem("adminToken"); 
+    localStorage.removeItem("token");
+    localStorage.removeItem("adminToken");
+    localStorage.removeItem("sportAccess"); 
     localStorage.removeItem("adminSportAccess"); 
     localStorage.removeItem("adminName");
-    window.location.href = "/admin-login";
+    
+    if (setIsAuthenticated) setIsAuthenticated(false);
+    navigate("/admin-login");
   };
+
+  // Failsafe screen if the user has no recognized permissions
+  if (adminSportAccess === 'Restricted' || allowedSports[0] === "Restricted Access") {
+    return (
+      <div className="min-h-screen bg-[#0a0f1c] flex flex-col items-center justify-center text-white p-6 text-center">
+        <ShieldCheck size={64} className="text-rose-500 mb-6" />
+        <h1 className="text-2xl font-black mb-2">Access Corrupted</h1>
+        <p className="text-slate-400 mb-8 max-w-md">Your security token is out of sync or missing sports privileges. Please securely log out and log back in to refresh your council credentials.</p>
+        <button onClick={handleLogout} className="bg-rose-500 hover:bg-rose-600 px-8 py-3 rounded-xl font-bold transition">Force Security Logout</button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0f1c] w-full overflow-x-hidden font-sans text-slate-200 bg-[radial-gradient(ellipse_at_top,var(--tw-gradient-stops))] from-slate-900 via-[#0a0f1c] to-black pb-12 px-2 md:px-4 relative">
@@ -283,7 +316,7 @@ const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* SCHEDULER - MOBILE GRID COLLAPSE */}
+        {/* SCHEDULER - NOW STRICTLY ENFORCES ROLE */}
         {showScheduleForm && (
           <div className="bg-slate-900/80 backdrop-blur-xl p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-700 shadow-2xl animate-in zoom-in-95 duration-200 w-full">
             <form onSubmit={async (e) => { e.preventDefault(); const res = await apiCall("matches", "POST", newMatch); if (res) { fetchMatches(); setShowScheduleForm(false); showAlert("Match Scheduled"); } }} className="grid grid-cols-1 md:grid-cols-6 gap-4 md:gap-8">
@@ -298,7 +331,7 @@ const AdminDashboard = () => {
               <div className="col-span-1 md:col-span-2">
                 <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 block">Category</label>
                 <select value={newMatch.category} onChange={(e) => setNewMatch({ ...newMatch, category: e.target.value }) } className="w-full bg-slate-800 border border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl font-bold text-white outline-none focus:border-[#5E9BFF] transition text-sm">
-                  {SPORTS_CONFIG[newMatch.sport].categories.map((c) => (<option key={c}>{c}</option>))}
+                  {SPORTS_CONFIG[newMatch.sport]?.categories.map((c) => (<option key={c}>{c}</option>))}
                 </select>
               </div>
               <div className="col-span-1 md:col-span-2">
@@ -316,7 +349,7 @@ const AdminDashboard = () => {
                 <input type="time" value={newMatch.time} onChange={(e) => setNewMatch({ ...newMatch, time: e.target.value }) } className="w-full bg-slate-800 border border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl font-black text-white outline-none focus:border-[#5E9BFF] color-scheme-dark text-sm" required />
               </div>
 
-              {SPORTS_CONFIG[newMatch.sport].type !== "Athletics" ? (
+              {SPORTS_CONFIG[newMatch.sport]?.type !== "Athletics" ? (
                 <><div className="col-span-1 md:col-span-3"><label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 block">Team A</label><select value={newMatch.teamA} onChange={(e) => setNewMatch({ ...newMatch, teamA: e.target.value }) } className="w-full bg-slate-800 border border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl font-black text-white text-sm">{HOUSE_TEAMS.map((h) => (<option key={h} value={h}>{h}</option>))}</select></div><div className="col-span-1 md:col-span-3"><label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 block">Team B</label><select value={newMatch.teamB} onChange={(e) => setNewMatch({ ...newMatch, teamB: e.target.value }) } className="w-full bg-slate-800 border border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl font-black text-white text-sm">{HOUSE_TEAMS.map((h) => (<option key={h} value={h}>{h}</option>))}</select></div></>
               ) : <div className="col-span-1 md:col-span-6"><label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1.5 md:mb-2 block">Event Details</label><input placeholder="e.g. Boys 100m Finals" value={newMatch.teamA} onChange={(e) => setNewMatch({ ...newMatch, teamA: e.target.value }) } className="w-full bg-slate-800 border border-slate-700 p-3 md:p-4 rounded-xl md:rounded-2xl font-black text-white outline-none focus:border-[#5E9BFF] text-sm" required /></div>}
               
@@ -352,7 +385,7 @@ const AdminDashboard = () => {
                     </div>
 
                     {/* ADMIN TIMER CONTROLS */}
-                    {match.status === 'Live' && config.hasTimer && (
+                    {match.status === 'Live' && config?.hasTimer && (
                        <div className="flex flex-col items-center gap-2 md:gap-3 mb-6 md:mb-8">
                          <div className="flex justify-center items-center gap-2 md:gap-4 bg-slate-950 text-white rounded-xl md:rounded-2xl p-2 md:p-3 shadow-inner shadow-black w-max border border-slate-800 mx-auto">
                            <div className="flex items-center gap-2 md:gap-3 px-2 md:px-4 border-r border-slate-800">
@@ -386,15 +419,15 @@ const AdminDashboard = () => {
                       <div className="flex justify-between items-center text-center px-0 md:px-2">
                         <div className="w-[45%] md:w-5/12">
                           <p className={`font-black text-[9px] md:text-xs uppercase mb-3 md:mb-4 truncate ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>{match.teamA}</p>
-                          {match.status === "Live" && config.scoreUI !== "none" ? (
+                          {match.status === "Live" && config?.scoreUI !== "none" ? (
                             <div className="bg-slate-800/50 p-2 md:p-5 rounded-2xl md:rounded-4xl border border-slate-700 flex flex-col items-center gap-3 relative">
-                              {config.hasServe && <button onClick={() => toggleServe(match._id, 'A')} className={`absolute top-1 md:top-2 left-1 md:left-2 text-[7px] md:text-[8px] font-black uppercase px-1.5 md:px-2 py-0.5 md:py-1 rounded-full transition shadow-sm ${match.servingTeam === 'A' ? 'bg-[#FF9B54] text-slate-900 shadow-[0_0_10px_rgba(255,155,84,0.5)]' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>Serve</button>}
-                              <div className={`flex items-center gap-1.5 md:gap-4 ${config.hasServe ? 'mt-4' : ''}`}>
-                                <button onClick={() => changeScore(match._id, "scoreA", config.scoreUI === "goals" ? "goals" : "points", -1) } className="p-1 md:p-2 bg-slate-700 text-slate-300 rounded-md md:rounded-xl hover:bg-slate-600"><Minus size={12} /></button>
+                              {config?.hasServe && <button onClick={() => toggleServe(match._id, 'A')} className={`absolute top-1 md:top-2 left-1 md:left-2 text-[7px] md:text-[8px] font-black uppercase px-1.5 md:px-2 py-0.5 md:py-1 rounded-full transition shadow-sm ${match.servingTeam === 'A' ? 'bg-[#FF9B54] text-slate-900 shadow-[0_0_10px_rgba(255,155,84,0.5)]' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>Serve</button>}
+                              <div className={`flex items-center gap-1.5 md:gap-4 ${config?.hasServe ? 'mt-4' : ''}`}>
+                                <button onClick={() => changeScore(match._id, "scoreA", config?.scoreUI === "goals" ? "goals" : "points", -1) } className="p-1 md:p-2 bg-slate-700 text-slate-300 rounded-md md:rounded-xl hover:bg-slate-600"><Minus size={12} /></button>
                                 <span className="text-3xl md:text-5xl font-black text-white drop-shadow-md w-8 md:w-auto">{match.scoreA?.points || match.scoreA?.goals || 0}</span>
-                                <button onClick={() => changeScore(match._id, "scoreA", config.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
+                                <button onClick={() => changeScore(match._id, "scoreA", config?.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
                               </div>
-                              {config.scoreUI === "points_and_sets" && (
+                              {config?.scoreUI === "points_and_sets" && (
                                 <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-2 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700">
                                   <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase">Sets</span><span className="text-[10px] md:text-sm font-black text-[#5E9BFF]">{match.scoreA?.sets || 0}</span>
                                   <button onClick={() => changeScore(match._id, "scoreA", "sets", 1) } className="text-[#5E9BFF]"><Plus size={10} /></button>
@@ -402,7 +435,7 @@ const AdminDashboard = () => {
                               )}
                               <button onClick={() => handleForfeit(match, match.teamA)} className="text-[7px] md:text-[9px] text-rose-500/70 font-black uppercase flex items-center gap-1 mt-1 hover:text-rose-500 transition"><Flag size={8} /> Forfeit</button>
                             </div>
-                          ) : match.status === 'Completed' && config.scoreUI !== "none" ? (
+                          ) : match.status === 'Completed' && config?.scoreUI !== "none" ? (
                             <div className="py-2 md:py-4">
                               <div className="text-4xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreA?.points || match.scoreA?.goals || 0}</div>
                               {match.scoreA?.sets > 0 && <span className="text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase mt-1 md:mt-2 block">Sets: {match.scoreA.sets}</span>}
@@ -414,15 +447,15 @@ const AdminDashboard = () => {
 
                         <div className="w-[45%] md:w-5/12">
                           <p className={`font-black text-[9px] md:text-xs uppercase mb-3 md:mb-4 truncate ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>{match.teamB || "OPEN FIELD"}</p>
-                          {match.status === "Live" && config.scoreUI !== "none" ? (
+                          {match.status === "Live" && config?.scoreUI !== "none" ? (
                             <div className="bg-slate-800/50 p-2 md:p-5 rounded-2xl md:rounded-4xl border border-slate-700 flex flex-col items-center gap-3 relative">
-                              {config.hasServe && <button onClick={() => toggleServe(match._id, 'B')} className={`absolute top-1 md:top-2 right-1 md:right-2 text-[7px] md:text-[8px] font-black uppercase px-1.5 md:px-2 py-0.5 md:py-1 rounded-full transition shadow-sm ${match.servingTeam === 'B' ? 'bg-[#FF9B54] text-slate-900 shadow-[0_0_10px_rgba(255,155,84,0.5)]' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>Serve</button>}
-                              <div className={`flex items-center gap-1.5 md:gap-4 ${config.hasServe ? 'mt-4' : ''}`}>
-                                <button onClick={() => changeScore(match._id, "scoreB", config.scoreUI === "goals" ? "goals" : "points", -1) } className="p-1 md:p-2 bg-slate-700 text-slate-300 rounded-md md:rounded-xl hover:bg-slate-600"><Minus size={12} /></button>
+                              {config?.hasServe && <button onClick={() => toggleServe(match._id, 'B')} className={`absolute top-1 md:top-2 right-1 md:right-2 text-[7px] md:text-[8px] font-black uppercase px-1.5 md:px-2 py-0.5 md:py-1 rounded-full transition shadow-sm ${match.servingTeam === 'B' ? 'bg-[#FF9B54] text-slate-900 shadow-[0_0_10px_rgba(255,155,84,0.5)]' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>Serve</button>}
+                              <div className={`flex items-center gap-1.5 md:gap-4 ${config?.hasServe ? 'mt-4' : ''}`}>
+                                <button onClick={() => changeScore(match._id, "scoreB", config?.scoreUI === "goals" ? "goals" : "points", -1) } className="p-1 md:p-2 bg-slate-700 text-slate-300 rounded-md md:rounded-xl hover:bg-slate-600"><Minus size={12} /></button>
                                 <span className="text-3xl md:text-5xl font-black text-white drop-shadow-md w-8 md:w-auto">{match.scoreB?.points || match.scoreB?.goals || 0}</span>
-                                <button onClick={() => changeScore(match._id, "scoreB", config.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
+                                <button onClick={() => changeScore(match._id, "scoreB", config?.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
                               </div>
-                              {config.scoreUI === "points_and_sets" && (
+                              {config?.scoreUI === "points_and_sets" && (
                                 <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-2 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700">
                                   <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase">Sets</span><span className="text-[10px] md:text-sm font-black text-[#5E9BFF]">{match.scoreB?.sets || 0}</span>
                                   <button onClick={() => changeScore(match._id, "scoreB", "sets", 1) } className="text-[#5E9BFF]"><Plus size={10} /></button>
@@ -430,7 +463,7 @@ const AdminDashboard = () => {
                               )}
                               <button onClick={() => handleForfeit(match, match.teamB)} className="text-[7px] md:text-[9px] text-rose-500/70 font-black uppercase flex items-center gap-1 mt-1 hover:text-rose-500 transition"><Flag size={8} /> Forfeit</button>
                             </div>
-                          ) : match.status === 'Completed' && config.scoreUI !== "none" ? (
+                          ) : match.status === 'Completed' && config?.scoreUI !== "none" ? (
                             <div className="py-2 md:py-4">
                               <div className="text-4xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreB?.points || match.scoreB?.goals || 0}</div>
                               {match.scoreB?.sets > 0 && <span className="text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase mt-1 md:mt-2 block">Sets: {match.scoreB.sets}</span>}
