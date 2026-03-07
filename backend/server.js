@@ -22,6 +22,7 @@ const app = express();
 
 app.set('trust proxy', 1);
 
+// --- 1. SECURITY & HEADERS ---
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -34,15 +35,17 @@ app.use(helmet({
   },
 }));
 
+// DYNAMIC CORS ALLOWANCE (Fixes the Vercel Block)
 const allowedOrigins = [
     process.env.FRONTEND_URL, 
     'http://localhost:5173',
     'https://sport-live-score.vercel.app' 
 ].filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+    // Allow if no origin (mobile apps/curl), if in allowed array, OR if it's a Vercel deployment link
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
       console.error("CORS Blocked for origin:", origin);
@@ -50,8 +53,9 @@ app.use(cors({
     }
   },
   credentials: true
-}));
+};
 
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const loginLimiter = rateLimit({
@@ -62,11 +66,13 @@ const loginLimiter = rateLimit({
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+// Apply identical dynamic CORS rules to Socket.io
 const server = http.createServer(app);
 const io = new Server(server, { 
-  cors: { 
-    origin: allowedOrigins,
-    methods: ["GET", "POST"]
+  cors: {
+    origin: corsOptions.origin,
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true
   } 
 });
 
@@ -114,11 +120,20 @@ const seedSecretaries = async () => {
 
 // --- 3. AUTH & RBAC MIDDLEWARE ---
 
+// REQUIRED: JWT_SECRET must be set in Render Environment Variables
+const getJwtSecret = () => {
+  if (!process.env.JWT_SECRET) {
+    console.error("🚨 FATAL ERROR: JWT_SECRET environment variable is missing!");
+    process.exit(1); 
+  }
+  return process.env.JWT_SECRET;
+};
+
 const verifyToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(403).json({ error: 'No token provided.' });
   
-  jwt.verify(token, process.env.JWT_SECRET || 'techavinya_secret', (err, decoded) => {
+  jwt.verify(token, getJwtSecret(), (err, decoded) => {
     if (err) return res.status(401).json({ error: 'Unauthorized or token expired.' });
     req.user = decoded; 
     next();
@@ -160,12 +175,17 @@ app.post('/api/admin/login', loginLimiter, async (req, res) => {
   
     const token = jwt.sign(
       { id: admin._id, sportAccess: admin.sportCategory }, 
-      process.env.JWT_SECRET || 'techavinya_secret', 
+      getJwtSecret(), 
       { expiresIn: '12h' }
     );
     
     res.json({ token, sportAccess: admin.sportCategory, name: admin.name });
   } catch (error) { res.status(500).json({ error: 'Login error' }); }
+});
+
+// ADDED: Crucial route for frontend session validation
+app.get('/api/admin/verify', verifyToken, (req, res) => {
+  res.status(200).json({ valid: true, user: req.user });
 });
 
 // --- 5. PROTECTED MATCH ROUTES ---
@@ -180,7 +200,9 @@ app.post('/api/matches', verifyToken, async (req, res) => {
 app.put('/api/matches/:id', verifyToken, async (req, res) => {
   const matchCheck = await Match.findById(req.params.id);
   if (!matchCheck || !hasSportAccess(req.user.sportAccess, matchCheck.sport)) return res.status(403).json({ error: 'Unauthorized' });
-  const match = await Match.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  
+  // FIXED: Replaced { new: true } with { returnDocument: 'after' } to clear Mongoose warning
+  const match = await Match.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after' });
   io.emit('matchUpdated', match);
   res.json(match);
 });
@@ -198,10 +220,11 @@ app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
     if (overallHousePoints && Array.isArray(overallHousePoints)) {
       for (const hp of overallHousePoints) {
         if (hp.points > 0) {
+          // FIXED: Replaced { new: true } with { returnDocument: 'after' }
           await House.findOneAndUpdate(
             { name: hp.name },
             { $inc: { points: Number(hp.points) } },
-            { upsert: true }
+            { upsert: true, returnDocument: 'after' }
           );
         }
       }
