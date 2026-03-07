@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Lock, ArrowRight, AlertCircle, Mail } from 'lucide-react';
+import { io } from "socket.io-client";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL;
 
