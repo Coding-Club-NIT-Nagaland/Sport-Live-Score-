@@ -161,7 +161,7 @@ app.put('/api/matches/:id', verifyToken, async (req, res) => {
   res.json(match);
 });
 
-// UPGRADED: Math-Aware Resolve Route
+// UPGRADED: Math-Aware & Set-Aware Resolve Route
 app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
   try {
     const match = await Match.findById(req.params.id);
@@ -169,25 +169,46 @@ app.put('/api/matches/:id/resolve', verifyToken, async (req, res) => {
 
     const { overallHousePoints, winnerOverride, resultSummary } = req.body;
 
-    // AUTO-CALCULATE WINNER FROM SCORES
+    // AUTO-CALCULATE WINNER FROM SCORES OR SETS
     let finalWinner = winnerOverride || match.winner;
     let finalSummary = resultSummary || match.resultSummary;
 
     if (match.teamB && match.sport !== 'Cricket') {
-       const scoreType = (match.sport === 'Football' || match.sport === 'Futsal') ? 'goals' : 'points';
-       const scoreA = match.scoreA?.[scoreType] || 0;
-       const scoreB = match.scoreB?.[scoreType] || 0;
+       const setBasedSports = ['Volleyball', 'Badminton', 'Table Tennis'];
+       const isSetBased = setBasedSports.includes(match.sport);
 
        if (!winnerOverride) { 
-           if (scoreA > scoreB) {
-              finalWinner = match.teamA;
-              if (!resultSummary) finalSummary = `${match.teamA} won by ${scoreA - scoreB} ${scoreType}`;
-           } else if (scoreB > scoreA) {
-              finalWinner = match.teamB;
-              if (!resultSummary) finalSummary = `${match.teamB} won by ${scoreB - scoreA} ${scoreType}`;
+           if (isSetBased) {
+               // International Rule: Winner is decided by Sets won
+               const setsA = match.scoreA?.sets || 0;
+               const setsB = match.scoreB?.sets || 0;
+
+               if (setsA > setsB) {
+                   finalWinner = match.teamA;
+                   if (!resultSummary) finalSummary = `${match.teamA} won ${setsA}-${setsB} in sets`;
+               } else if (setsB > setsA) {
+                   finalWinner = match.teamB;
+                   if (!resultSummary) finalSummary = `${match.teamB} won ${setsB}-${setsA} in sets`;
+               } else {
+                   finalWinner = "Draw";
+                   if (!resultSummary) finalSummary = `Match Draw (${setsA}-${setsB} sets)`;
+               }
            } else {
-              finalWinner = "Draw";
-              if (!resultSummary) finalSummary = `Match Draw (${scoreA}-${scoreB})`;
+               // Standard Rule: Winner decided by Points/Goals
+               const scoreType = (match.sport === 'Football' || match.sport === 'Futsal') ? 'goals' : 'points';
+               const scoreA = match.scoreA?.[scoreType] || 0;
+               const scoreB = match.scoreB?.[scoreType] || 0;
+
+               if (scoreA > scoreB) {
+                  finalWinner = match.teamA;
+                  if (!resultSummary) finalSummary = `${match.teamA} won by ${scoreA - scoreB} ${scoreType}`;
+               } else if (scoreB > scoreA) {
+                  finalWinner = match.teamB;
+                  if (!resultSummary) finalSummary = `${match.teamB} won by ${scoreB - scoreA} ${scoreType}`;
+               } else {
+                  finalWinner = "Draw";
+                  if (!resultSummary) finalSummary = `Match Draw (${scoreA}-${scoreB})`;
+               }
            }
        }
     }

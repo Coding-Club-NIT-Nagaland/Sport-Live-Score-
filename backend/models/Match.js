@@ -14,6 +14,15 @@ const MatchSchema = new mongoose.Schema({
   isTimerRunning: { type: Boolean, default: false },
   timerUpdatedAt: { type: Date, default: Date.now },
   extraTime: { type: Number, default: 0 } ,
+  venue: { 
+  type: String, 
+  default: "Main Ground" 
+},
+setHistory: [{
+  setNumber: Number,
+  scoreA: Number,
+  scoreB: Number
+}],
   servingTeam: { type: String, enum: ['A', 'B', null], default: null } 
 }, { timestamps: true });
 

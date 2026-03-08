@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { io } from 'socket.io-client';
-import { Trophy, Activity, Calendar, ListOrdered, ExternalLink, CheckCircle, Flame, Medal, Search, Info, CircleDot, UserPlus, Zap } from 'lucide-react';
+import { Trophy, Activity, Calendar, ListOrdered, ExternalLink, CheckCircle, Flame, Medal, Search, Info, CircleDot, UserPlus, Zap, MapPin, ChevronDown } from 'lucide-react';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -14,14 +14,15 @@ const socket = io(API_URL, {
   reconnectionDelay: 2000,
 });
 
-const HOUSES = ['Grey House (Wolves)', 'Black House (Panthers)', 'Red House (Ravens)', 'Yellow House (Masters & PhD)', 'Blue House (Orca)'];
+const HOUSES = ['Wolves', 'Panthers', 'Red Ravens', 'Stallions', 'Orca'];
 
 const SPORTS_CONFIG = {
   'Football': { hasTimer: true }, 'Futsal': { hasTimer: true }, 'Basketball': { hasTimer: true }, 'Tug of War': { hasTimer: true }, 'Kho-Kho': { hasTimer: true },
   'Badminton': { hasServe: true }, 'Table Tennis': { hasServe: true }
 };
 
-// --- FRONTEND STANDINGS CALCULATOR ---
+const SPORTS_LIST = ['Football', 'Futsal', 'Cricket', 'Basketball', 'Volleyball', 'Badminton', 'Table Tennis', 'Chess', 'Carrom', 'Tug of War', 'Kho-Kho', 'Athletics'];
+
 const calculateStandings = (matchesData) => {
   const standings = {};
   matchesData.forEach(m => {
@@ -35,16 +36,23 @@ const calculateStandings = (matchesData) => {
      const tA = standings[m.sport][group][m.teamA]; const tB = standings[m.sport][group][m.teamB];
      tA.p++; tB.p++;
 
-     const type = (m.sport === 'Football' || m.sport === 'Futsal') ? 'goals' : 'points';
-     const sA = m.scoreA?.[type] || 0; const sB = m.scoreB?.[type] || 0;
+     const isSetBased = ['Volleyball', 'Badminton', 'Table Tennis'].includes(m.sport);
+     let scoreA = 0; let scoreB = 0;
 
-     // Math-aware logic: Trust 'winner' string if set, otherwise calculate from scores
-     if (m.winner === m.teamA || (sA > sB && !m.winner)) { tA.w++; tB.l++; tA.pts+=3; }
-     else if (m.winner === m.teamB || (sB > sA && !m.winner)) { tB.w++; tA.l++; tB.pts+=3; }
+     if (isSetBased) {
+         scoreA = m.scoreA?.sets || 0;
+         scoreB = m.scoreB?.sets || 0;
+     } else {
+         const type = (m.sport === 'Football' || m.sport === 'Futsal') ? 'goals' : 'points';
+         scoreA = m.scoreA?.[type] || 0;
+         scoreB = m.scoreB?.[type] || 0;
+     }
+
+     if (m.winner === m.teamA || (scoreA > scoreB && !m.winner)) { tA.w++; tB.l++; tA.pts+=3; }
+     else if (m.winner === m.teamB || (scoreB > scoreA && !m.winner)) { tB.w++; tA.l++; tB.pts+=3; }
      else { tA.d++; tB.d++; tA.pts++; tB.pts++; }
   });
 
-  // Convert object structure into sorted arrays for the table
   const formatted = {};
   Object.keys(standings).forEach(sport => {
     formatted[sport] = {};
@@ -83,6 +91,7 @@ const StudentDashboard = () => {
   const [pointsTable, setPointsTable] = useState({});
   const [leaderboard, setLeaderboard] = useState([]);
   const [selectedSport, setSelectedSport] = useState('Football');
+  const [filterSport, setFilterSport] = useState('All'); 
   const { width, height } = useWindowSize();
 
   useEffect(() => {
@@ -104,8 +113,6 @@ const StudentDashboard = () => {
     } catch (err) { console.error(err); }
   };
 
-  // FIXED: Standardize state management. 
-  // Recalculate Standings whenever the 'matches' state updates to prevent race conditions.
   useEffect(() => {
     if (matches.length > 0) {
       setPointsTable(calculateStandings(matches));
@@ -114,30 +121,29 @@ const StudentDashboard = () => {
 
   useEffect(() => {
     fetchData();
-    
-    // Live update listener
     socket.on('matchUpdated', (updatedMatch) => {
       setMatches(prev => prev.map(m => m._id === updatedMatch._id ? updatedMatch : m));
     });
-    
     socket.on('matchesUpdated', fetchData); 
     socket.on('leaderboardUpdated', fetchData);
-    
-    return () => { 
-        socket.off('matchUpdated'); 
-        socket.off('matchesUpdated'); 
-        socket.off('leaderboardUpdated'); 
-    };
+    return () => { socket.off('matchUpdated'); socket.off('matchesUpdated'); socket.off('leaderboardUpdated'); };
   }, []);
 
   const recentCompleted = matches.filter(m => m.status === 'Completed').slice(-3).map(m => m.winner ? `🏆 ${m.winner} wins ${m.sport}` : `🏆 ${m.sport} completed`);
   const upcomingMatches = matches.filter(m => m.status === 'Upcoming').slice(0, 3).map(m => `⏰ UPCOMING: ${m.sport} @ ${m.time}`);
   const tickerItems = [...recentCompleted, ...upcomingMatches].join(" ✦ ");
 
+  const filteredMatches = matches.filter(m => 
+    m.status === (activeTab === 'live' ? 'Live' : activeTab === 'upcoming' ? 'Upcoming' : 'Completed') &&
+    (filterSport === 'All' || m.sport === filterSport)
+
+  );
+  
+  const displayMatches = activeTab === 'finished' ? [...filteredMatches].reverse() : filteredMatches;
+
   return (
     <div className="bg-[#0a0f1c] min-h-full w-full overflow-x-hidden text-slate-200 bg-[radial-gradient(ellipse_at_top,var(--tw-gradient-stops))] from-slate-800 via-[#0a0f1c] to-black font-sans pb-20">
       
-      {/* LIVE TICKER */}
       <div className="bg-[#5E9BFF]/10 border-b border-[#5E9BFF]/20 text-[#5E9BFF] py-2 overflow-hidden flex items-center relative z-30 w-full">
         <style>{`@keyframes marquee { 0% { transform: translateX(100vw); } 100% { transform: translateX(-100%); } } .animate-marquee { display: inline-block; white-space: nowrap; animation: marquee 25s linear infinite; }`}</style>
         <div className="animate-marquee font-black uppercase text-[9px] md:text-[10px] tracking-[0.2em]">
@@ -149,7 +155,6 @@ const StudentDashboard = () => {
 
       <div className="max-w-7xl mx-auto space-y-8 md:space-y-12 px-3 md:px-4 mt-6">
         
-        {/* HERO HEADER */}
         <div className="text-center space-y-3 md:space-y-4 py-8 md:py-10 relative">
           <Trophy size={100} className="absolute left-4 top-4 md:left-10 md:top-10 text-slate-800/30 -rotate-12 blur-[1px] md:blur-[2px] hidden sm:block" />
           <Medal size={100} className="absolute right-4 top-4 md:right-10 md:top-10 text-slate-800/30 rotate-12 blur-[1px] md:blur-[2px] hidden sm:block" />
@@ -161,7 +166,7 @@ const StudentDashboard = () => {
             Sports Arena
           </h1>
           <p className="text-lg sm:text-xl md:text-2xl font-bold text-[#5E9BFF] mt-2 md:mt-4">Where Passion Meets Performance <span className="text-slate-500 hidden md:inline">|</span></p>
-          <p className="text-slate-400 font-medium max-w-2xl mx-auto text-xs sm:text-sm md:text-lg mt-1 md:mt-2 px-2">Celebrating athletic excellence and the spirit of competition at NIT Nagaland</p>
+          <p className="text-slate-400 font-medium max-w-2xl mx-auto text-xs sm:text-sm md:text-lg mt-1 md:mt-2 px-2">Celebrating athletic excellence and the spirit of competition at NIT Nagaland.</p>
           
           <div className="flex flex-wrap justify-center gap-3 md:gap-4 mt-6 md:mt-8 pt-4 md:pt-6 px-4">
             <button onClick={() => setActiveTab('points table')} className="bg-[#5E9BFF] text-slate-900 px-6 py-3 md:px-8 md:py-4 rounded-xl font-black flex items-center gap-2 shadow-[0_0_20px_rgba(94,155,255,0.4)] hover:bg-blue-400 transition text-xs md:text-sm"><Zap size={16}/> Explore</button>
@@ -169,7 +174,6 @@ const StudentDashboard = () => {
           </div>
         </div>
 
-        {/* TAB NAVIGATION */}
         <div className="flex justify-start lg:justify-center overflow-x-auto gap-2 border-b border-slate-800 pb-px hide-scrollbar w-full px-2">
           {[
             { id: 'live', label: 'Live', icon: <Activity size={16}/> },
@@ -185,31 +189,54 @@ const StudentDashboard = () => {
         </div>
 
         <div className="mt-6 md:mt-8">
-          {/* --- MATCH VIEW --- */}
           {(activeTab === 'live' || activeTab === 'upcoming' || activeTab === 'finished') && (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
-              {matches.filter(m => m.status === (activeTab === 'live' ? 'Live' : activeTab === 'upcoming' ? 'Upcoming' : 'Completed')).length > 0 ? (
-                matches.filter(m => m.status === (activeTab === 'live' ? 'Live' : activeTab === 'upcoming' ? 'Upcoming' : 'Completed')).map(match => (
-                  <StudentMatchCard key={match._id} match={match} />
-                ))
-              ) : (
-                <div className="col-span-full py-16 md:py-20 text-center bg-slate-900/50 rounded-[2rem] md:rounded-[3rem] border border-slate-800 backdrop-blur-md mx-2">
-                  <Search size={40} className="mx-auto text-slate-700 mb-3 md:mb-4" />
-                  <p className="text-slate-500 font-black uppercase tracking-widest text-[10px] md:text-xs">No {activeTab} matches at the moment</p>
+            <>
+              <div className="flex justify-center mb-6 md:mb-8 px-4 w-full max-w-sm mx-auto">
+                <div className="relative w-full">
+                  <select 
+                    value={filterSport} 
+                    onChange={(e) => setFilterSport(e.target.value)} 
+                    className="w-full bg-slate-900/80 backdrop-blur-md border border-slate-700 text-[#5E9BFF] p-3.5 md:p-4 rounded-xl md:rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-[0.2em] outline-none focus:border-[#5E9BFF] transition-all cursor-pointer appearance-none shadow-lg text-center"
+                  >
+                    <option value="All">All Sports</option>
+                    {SPORTS_LIST.map(sport => (
+                      <option key={sport} value={sport}>{sport}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-[#5E9BFF] pointer-events-none" />
                 </div>
-              )}
-            </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-6">
+                {displayMatches.length > 0 ? (
+                  displayMatches.map(match => (
+                    <StudentMatchCard key={match._id} match={match} />
+                  ))
+                ) : (
+                  <div className="col-span-full py-16 md:py-20 text-center bg-slate-900/50 rounded-[2rem] md:rounded-[3rem] border border-slate-800 backdrop-blur-md mx-2">
+                    <Search size={40} className="mx-auto text-slate-700 mb-3 md:mb-4" />
+                    <p className="text-slate-500 font-black uppercase tracking-widest text-[10px] md:text-xs">No {filterSport !== 'All' ? filterSport : activeTab} matches found</p>
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
-          {/* --- POINTS TABLE VIEW --- */}
           {activeTab === 'points table' && (
             <div className="space-y-6 md:space-y-8 w-full px-1">
-              <div className="flex flex-wrap justify-center gap-2 md:gap-3 bg-slate-900/50 p-3 md:p-4 rounded-2xl md:rounded-3xl border border-slate-800 backdrop-blur-md">
-                 {['Football', 'Futsal', 'Cricket', 'Basketball', 'Volleyball', 'Badminton', 'Table Tennis', 'Chess', 'Carrom', 'Tug of War', 'Kho-Kho', 'Athletics'].map(sport => (
-                   <button key={sport} onClick={() => setSelectedSport(sport)} className={`px-4 py-2 md:px-6 md:py-3 rounded-lg md:rounded-xl font-black text-[9px] md:text-[10px] uppercase tracking-widest transition-all ${selectedSport === sport ? 'bg-[#5E9BFF] text-slate-900 shadow-[0_0_15px_rgba(94,155,255,0.5)]' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
-                     {sport}
-                   </button>
-                 ))}
+              <div className="flex justify-center mb-6 px-4 w-full max-w-sm mx-auto">
+                <div className="relative w-full">
+                  <select 
+                    value={selectedSport} 
+                    onChange={(e) => setSelectedSport(e.target.value)} 
+                    className="w-full bg-slate-900/80 backdrop-blur-md border border-slate-700 text-[#5E9BFF] p-3.5 md:p-4 rounded-xl md:rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-[0.2em] outline-none focus:border-[#5E9BFF] transition-all cursor-pointer appearance-none shadow-lg text-center"
+                  >
+                    {SPORTS_LIST.map(sport => (
+                      <option key={sport} value={sport}>{sport}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-[#5E9BFF] pointer-events-none" />
+                </div>
               </div>
 
               {selectedSport === 'Cricket' ? (
@@ -234,7 +261,7 @@ const StudentDashboard = () => {
                     </div>
                   ) : <div className="py-16 md:py-20 text-center text-slate-500 font-black uppercase tracking-widest text-[9px] md:text-[10px]">No Athletics results recorded yet</div>}
                 </div>
-              ) : pointsTable[selectedSport] ? (
+              ) : pointsTable[selectedSport] && Object.keys(pointsTable[selectedSport]).length > 0 ? (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 md:gap-8 w-full">
                   {Object.entries(pointsTable[selectedSport]).map(([group, teams]) => (
                     <div key={group} className="bg-slate-900/50 rounded-[1.5rem] md:rounded-[2rem] border border-slate-800 overflow-hidden backdrop-blur-md w-full">
@@ -243,7 +270,7 @@ const StudentDashboard = () => {
                         <table className="w-full text-left text-xs md:text-sm whitespace-nowrap min-w-[450px]">
                           <thead className="bg-slate-900/50 font-black text-[9px] md:text-[10px] uppercase text-slate-500">
                             <tr>
-                              <th className="px-4 md:px-8 py-3 md:py-5">House</th>
+                              <th className="px-4 md:px-8 py-3 md:py-5">Team</th>
                               <th className="px-2 md:px-3 text-center" title="Played">P</th>
                               <th className="px-2 md:px-3 text-center text-emerald-400" title="Won">W</th>
                               <th className="px-2 md:px-3 text-center text-rose-400" title="Lost">L</th>
@@ -254,7 +281,7 @@ const StudentDashboard = () => {
                           <tbody>
                             {teams.map((t, i) => (
                               <tr key={i} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
-                                <td className="px-4 md:px-8 py-4 md:py-5 font-black text-white">{t.team}</td>
+                                <td className="px-4 md:px-8 py-4 md:py-5 font-black text-white whitespace-normal wrap-break-word max-w-[200px] leading-tight">{t.team}</td>
                                 <td className="px-2 md:px-3 py-4 md:py-5 text-center font-bold text-slate-400">{t.p}</td>
                                 <td className="px-2 md:px-3 py-4 md:py-5 text-center text-emerald-400 font-black">{t.w}</td>
                                 <td className="px-2 md:px-3 py-4 md:py-5 text-center text-rose-400 font-black">{t.l}</td>
@@ -272,7 +299,6 @@ const StudentDashboard = () => {
             </div>
           )}
 
-          {/* --- OVERALL LEADERBOARD WITH CHARTS --- */}
           {activeTab === 'leaderboard' && (
             <div className="space-y-6 md:space-y-8 max-w-5xl mx-auto animate-in fade-in zoom-in-95 duration-500 w-full px-1">
               
@@ -359,22 +385,22 @@ const StudentMatchCard = ({ match }) => {
             )}
           </div>
         ) : (
-          <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">{match.date} • {match.time}</span>
+          <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">{match.group}</span>
         )}
       </div>
       
-      <div className="text-center w-full overflow-hidden">
+      <div className="text-center w-full overflow-hidden flex-1 flex flex-col justify-center">
         {isCricket ? (
           <div className="space-y-4 md:space-y-6">
-            <div className="flex justify-center items-center gap-2 md:gap-6 font-black text-base md:text-xl text-white uppercase tracking-tighter w-full">
-              <span className={`truncate w-5/12 text-right ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : ''}`}>{match.teamA}</span>
-              <span className="text-slate-600 text-[10px] md:text-xs font-normal italic w-2/12">vs</span>
-              <span className={`truncate w-5/12 text-left ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : ''}`}>{match.teamB}</span>
+            <div className="flex justify-center items-center gap-2 md:gap-6 font-black text-sm md:text-xl text-white uppercase tracking-tighter w-full">
+              <span className={`w-[45%] text-right wrap-break-word leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : ''}`}>{match.teamA}</span>
+              <span className="text-slate-600 text-[10px] md:text-xs font-normal italic w-[10%]">vs</span>
+              <span className={`w-[45%] text-left wrap-break-word leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : ''}`}>{match.teamB}</span>
             </div>
             
             {isFinished ? (
               <div className="bg-slate-800/50 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-700">
-                <p className={`text-[#5E9BFF] font-black text-sm md:text-lg uppercase tracking-tight`}>{match.winner} WON</p>
+                <p className={`text-[#5E9BFF] font-black text-sm md:text-lg uppercase tracking-tight wrap-break-word px-2`}>{match.winner} WON</p>
                 <p className="text-slate-400 text-[8px] md:text-[10px] font-bold uppercase tracking-widest mt-1 truncate">{match.resultSummary || 'Match Completed'}</p>
                 <a href={match.cricHeroesLink} target="_blank" rel="noreferrer" className="text-[8px] md:text-[9px] font-black text-slate-400 hover:text-[#5E9BFF] uppercase mt-3 md:mt-4 flex items-center justify-center gap-1 transition">Full Scorecard <ExternalLink size={10}/></a>
               </div>
@@ -383,31 +409,76 @@ const StudentMatchCard = ({ match }) => {
             )}
           </div>
         ) : match.teamB ? (
-          <div className="flex flex-col w-full">
-            <div className="flex justify-between items-center text-center w-full">
-              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative">
+          <div className="flex flex-col w-full h-full justify-between">
+            <div className="flex justify-between items-start text-center w-full">
+              
+              {/* TEAM A BLOCK */}
+              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative items-center">
                 {hasServe && match.servingTeam === 'A' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
-                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight truncate ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>
+                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight  wrap-break-word leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>
                   {match.teamA}
                 </h3>
-                {match.status !== 'Upcoming' && <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreA?.[scoreType] || 0}</div>}
-                {match.scoreA?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreA.sets}</span>}
+                
+                {/* FIXED SCORE/SET LOGIC FOR COMPLETED MATCHES */}
+                {match.status !== 'Upcoming' && (
+                  <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">
+                    {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished 
+                      ? (match.scoreA?.sets || 0) 
+                      : (match.scoreA?.[scoreType] || 0)}
+                  </div>
+                )}
+                
+                {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished ? (
+                   <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">Sets Won</span>
+                ) : (
+                   match.scoreA?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreA.sets}</span>
+                )}
               </div>
-              <div className="w-[10%] md:w-2/12 text-[8px] md:text-[10px] font-black text-slate-600 uppercase italic">VS</div>
-              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative">
+
+              <div className="w-[10%] md:w-2/12 text-[8px] md:text-[10px] font-black text-slate-600 uppercase italic mt-2 md:mt-3">VS</div>
+              
+              {/* TEAM B BLOCK */}
+              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative items-center">
                 {hasServe && match.servingTeam === 'B' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
-                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight truncate ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>
+                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight wrap-break-word leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>
                   {match.teamB}
                 </h3>
-                {match.status !== 'Upcoming' && <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">{match.scoreB?.[scoreType] || 0}</div>}
-                {match.scoreB?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreB.sets}</span>}
+                
+                {/* FIXED SCORE/SET LOGIC FOR COMPLETED MATCHES */}
+                {match.status !== 'Upcoming' && (
+                  <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">
+                    {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished 
+                      ? (match.scoreB?.sets || 0) 
+                      : (match.scoreB?.[scoreType] || 0)}
+                  </div>
+                )}
+                
+                {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished ? (
+                   <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">Sets Won</span>
+                ) : (
+                   match.scoreB?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreB.sets}</span>
+                )}
               </div>
             </div>
+
+            {match.setHistory && match.setHistory.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-800/50 flex flex-col items-center w-full">
+                <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Recorded Sets</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {match.setHistory.map((set, idx) => (
+                    <div key={idx} className="bg-slate-800/80 border border-slate-700 px-3 py-1.5 rounded-lg flex items-center gap-2 text-[10px] md:text-xs font-black shadow-inner">
+                      <span className={set.scoreA > set.scoreB ? 'text-[#5E9BFF]' : 'text-slate-400'}>{set.scoreA}</span>
+                      <span className="text-slate-600">v</span>
+                      <span className={set.scoreB > set.scoreA ? 'text-[#5E9BFF]' : 'text-slate-400'}>{set.scoreB}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             
-            {/* FIX: Winner Banner strictly for Head-to-Head */}
             {isFinished && (match.winner || match.resultSummary) && (
               <div className="mt-4 pt-3 md:pt-4 border-t border-slate-800 text-center w-full">
-                 <p className="text-[#5E9BFF] font-black text-[10px] md:text-xs uppercase tracking-tight">
+                 <p className="text-[#5E9BFF] font-black text-[10px] md:text-xs uppercase tracking-tight wrap-break-word px-2">
                     {match.winner ? `${match.winner} WON` : 'MATCH DRAW / FINISHED'}
                  </p>
                  {match.resultSummary && <p className="text-slate-400 text-[8px] md:text-[10px] font-bold uppercase tracking-widest mt-1">{match.resultSummary}</p>}
@@ -416,17 +487,25 @@ const StudentMatchCard = ({ match }) => {
           </div>
         ) : (
           <div className="text-center py-4 md:py-6 bg-slate-800/50 rounded-xl md:rounded-2xl border border-slate-700 w-full">
-             <p className="text-base md:text-xl font-black text-white uppercase tracking-tighter truncate px-2">{match.teamA}</p>
+             <p className="text-base md:text-xl font-black text-white uppercase tracking-tighter wrap-break-word leading-tight px-2">{match.teamA}</p>
              {isFinished && match.winner ? (
                <div className="mt-3 md:mt-4 flex flex-col items-center gap-1.5 md:gap-2">
                  <div className="bg-yellow-500/20 p-1.5 md:p-2 rounded-full border border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.3)]"><Trophy size={16} className="text-yellow-400 md:w-5 md:h-5"/></div>
-                 <p className={`text-[10px] md:text-xs font-black text-[#5E9BFF] uppercase tracking-widest mt-1 truncate max-w-full px-2`}>{match.winner} (Gold)</p>
+                 <p className={`text-[10px] md:text-xs font-black text-[#5E9BFF] uppercase tracking-widest mt-1 wrap-break-word max-w-full px-2 leading-tight`}>{match.winner} (Gold)</p>
                </div>
              ) : (
                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mt-1.5 md:mt-2">Individual Event</p>
              )}
           </div>
         )}
+      </div>
+
+      <div className="mt-5 pt-4 border-t border-slate-800 w-full flex justify-center">
+         <span className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase flex flex-col sm:flex-row items-center gap-1 sm:gap-2">
+           <span className="flex items-center gap-1.5"><Calendar size={12} /> {match.date} @ {match.time}</span>
+           <span className="hidden sm:inline text-slate-700">•</span>
+           <span className="flex items-center gap-1.5 text-[#FF9B54]"><MapPin size={12}/> {match.venue || 'Main Ground'}</span>
+         </span>
       </div>
     </div>
   );
