@@ -16,9 +16,24 @@ const socket = io(API_URL, {
 
 const HOUSES = ['Wolves', 'Panthers', 'Red Ravens', 'Stallions', 'Orca'];
 
+// FIXED: Brought over the complete dictionary from AdminDashboard so the frontend knows which sports use sets!
 const SPORTS_CONFIG = {
-  'Football': { hasTimer: true }, 'Futsal': { hasTimer: true }, 'Basketball': { hasTimer: true }, 'Tug of War': { hasTimer: true }, 'Kho-Kho': { hasTimer: true },
-  'Badminton': { hasServe: true }, 'Table Tennis': { hasServe: true }
+  Football: { scoreUI: "goals", hasTimer: true },
+  Futsal: { scoreUI: "goals", hasTimer: true },
+  Cricket: { scoreUI: "none", hasTimer: false },
+  Basketball: { scoreUI: "basketball", hasTimer: true },
+  Volleyball: { scoreUI: "points_and_sets", hasTimer: false },
+  Badminton: { scoreUI: "points_and_sets", hasTimer: false, hasServe: true },
+  Carrom: { scoreUI: "points", hasTimer: false },
+  Chess: { scoreUI: "points", hasTimer: false },
+  "Table Tennis": { scoreUI: "points_and_sets", hasTimer: false, hasServe: true },
+  "Tug of War": { scoreUI: "points", hasTimer: true },
+  "Kho-Kho": { scoreUI: "points", hasTimer: true },
+  Marathon: { scoreUI: "none", hasTimer: false },
+  "High Jump": { scoreUI: "none", hasTimer: false },
+  "Long Jump": { scoreUI: "none", hasTimer: false },
+  Skipping: { scoreUI: "none", hasTimer: false },
+  Shotput: { scoreUI: "none", hasTimer: false },
 };
 
 const SPORTS_LIST = ['Football', 'Futsal', 'Cricket', 'Basketball', 'Volleyball', 'Badminton', 'Table Tennis', 'Chess', 'Carrom', 'Tug of War', 'Kho-Kho', 'Athletics'];
@@ -133,12 +148,7 @@ const StudentDashboard = () => {
   const upcomingMatches = matches.filter(m => m.status === 'Upcoming').slice(0, 3).map(m => `⏰ UPCOMING: ${m.sport} @ ${m.time}`);
   const tickerItems = [...recentCompleted, ...upcomingMatches].join(" ✦ ");
 
-  const filteredMatches = matches.filter(m => 
-    m.status === (activeTab === 'live' ? 'Live' : activeTab === 'upcoming' ? 'Upcoming' : 'Completed') &&
-    (filterSport === 'All' || m.sport === filterSport)
-
-  );
-  
+  const filteredMatches = matches.filter(m => m.status === (activeTab === 'live' ? 'Live' : activeTab === 'upcoming' ? 'Upcoming' : 'Completed') && (filterSport === 'All' || m.sport === filterSport));
   const displayMatches = activeTab === 'finished' ? [...filteredMatches].reverse() : filteredMatches;
 
   return (
@@ -281,7 +291,7 @@ const StudentDashboard = () => {
                           <tbody>
                             {teams.map((t, i) => (
                               <tr key={i} className="border-t border-slate-800 hover:bg-slate-800/50 transition">
-                                <td className="px-4 md:px-8 py-4 md:py-5 font-black text-white whitespace-normal wrap-break-word max-w-[200px] leading-tight">{t.team}</td>
+                                <td className="px-4 md:px-8 py-4 md:py-5 font-black text-white whitespace-normal break-words max-w-[200px] leading-tight">{t.team}</td>
                                 <td className="px-2 md:px-3 py-4 md:py-5 text-center font-bold text-slate-400">{t.p}</td>
                                 <td className="px-2 md:px-3 py-4 md:py-5 text-center text-emerald-400 font-black">{t.w}</td>
                                 <td className="px-2 md:px-3 py-4 md:py-5 text-center text-rose-400 font-black">{t.l}</td>
@@ -393,14 +403,14 @@ const StudentMatchCard = ({ match }) => {
         {isCricket ? (
           <div className="space-y-4 md:space-y-6">
             <div className="flex justify-center items-center gap-2 md:gap-6 font-black text-sm md:text-xl text-white uppercase tracking-tighter w-full">
-              <span className={`w-[45%] text-right wrap-break-word leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : ''}`}>{match.teamA}</span>
+              <span className={`w-[45%] text-right break-words leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : ''}`}>{match.teamA}</span>
               <span className="text-slate-600 text-[10px] md:text-xs font-normal italic w-[10%]">vs</span>
-              <span className={`w-[45%] text-left wrap-break-word leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : ''}`}>{match.teamB}</span>
+              <span className={`w-[45%] text-left break-words leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : ''}`}>{match.teamB}</span>
             </div>
             
             {isFinished ? (
               <div className="bg-slate-800/50 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-700">
-                <p className={`text-[#5E9BFF] font-black text-sm md:text-lg uppercase tracking-tight wrap-break-word px-2`}>{match.winner} WON</p>
+                <p className={`text-[#5E9BFF] font-black text-sm md:text-lg uppercase tracking-tight break-words px-2`}>{match.winner} WON</p>
                 <p className="text-slate-400 text-[8px] md:text-[10px] font-bold uppercase tracking-widest mt-1 truncate">{match.resultSummary || 'Match Completed'}</p>
                 <a href={match.cricHeroesLink} target="_blank" rel="noreferrer" className="text-[8px] md:text-[9px] font-black text-slate-400 hover:text-[#5E9BFF] uppercase mt-3 md:mt-4 flex items-center justify-center gap-1 transition">Full Scorecard <ExternalLink size={10}/></a>
               </div>
@@ -412,16 +422,15 @@ const StudentMatchCard = ({ match }) => {
           <div className="flex flex-col w-full h-full justify-between">
             <div className="flex justify-between items-start text-center w-full">
               
-              {/* TEAM A BLOCK */}
-              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative items-center">
+              <div className="w-[45%] md:w-5/12 flex flex-col items-center relative">
                 {hasServe && match.servingTeam === 'A' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
-                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight  wrap-break-word leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>
+                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight break-words leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>
                   {match.teamA}
                 </h3>
                 
-                {/* FIXED SCORE/SET LOGIC FOR COMPLETED MATCHES */}
                 {match.status !== 'Upcoming' && (
                   <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">
+                    {/* NOW THIS WILL CORRECTLY FIND 'points_and_sets' and SHOW THE SET COUNT INSTEAD OF 0 */}
                     {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished 
                       ? (match.scoreA?.sets || 0) 
                       : (match.scoreA?.[scoreType] || 0)}
@@ -431,22 +440,21 @@ const StudentMatchCard = ({ match }) => {
                 {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished ? (
                    <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">Sets Won</span>
                 ) : (
-                   match.scoreA?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreA.sets}</span>
+                   match.scoreA?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase mt-1`}>Sets: {match.scoreA.sets}</span>
                 )}
               </div>
 
               <div className="w-[10%] md:w-2/12 text-[8px] md:text-[10px] font-black text-slate-600 uppercase italic mt-2 md:mt-3">VS</div>
               
-              {/* TEAM B BLOCK */}
-              <div className="w-[45%] md:w-5/12 flex flex-col gap-1.5 md:gap-2 relative items-center">
+              <div className="w-[45%] md:w-5/12 flex flex-col items-center relative">
                 {hasServe && match.servingTeam === 'B' && <CircleDot size={12} className="text-[#FF9B54] absolute -top-3 md:-top-4 left-1/2 -translate-x-1/2 animate-bounce drop-shadow-[0_0_8px_rgba(255,155,84,0.8)] md:w-[14px] md:h-[14px]" />}
-                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight wrap-break-word leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>
+                <h3 className={`font-black text-[9px] md:text-[11px] uppercase tracking-tight break-words leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>
                   {match.teamB}
                 </h3>
                 
-                {/* FIXED SCORE/SET LOGIC FOR COMPLETED MATCHES */}
                 {match.status !== 'Upcoming' && (
                   <div className="text-3xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">
+                    {/* NOW THIS WILL CORRECTLY FIND 'points_and_sets' and SHOW THE SET COUNT INSTEAD OF 0 */}
                     {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished 
                       ? (match.scoreB?.sets || 0) 
                       : (match.scoreB?.[scoreType] || 0)}
@@ -456,7 +464,7 @@ const StudentMatchCard = ({ match }) => {
                 {SPORTS_CONFIG[match.sport]?.scoreUI === 'points_and_sets' && isFinished ? (
                    <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">Sets Won</span>
                 ) : (
-                   match.scoreB?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase`}>Sets: {match.scoreB.sets}</span>
+                   match.scoreB?.sets > 0 && <span className={`text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase mt-1`}>Sets: {match.scoreB.sets}</span>
                 )}
               </div>
             </div>
@@ -478,7 +486,7 @@ const StudentMatchCard = ({ match }) => {
             
             {isFinished && (match.winner || match.resultSummary) && (
               <div className="mt-4 pt-3 md:pt-4 border-t border-slate-800 text-center w-full">
-                 <p className="text-[#5E9BFF] font-black text-[10px] md:text-xs uppercase tracking-tight wrap-break-word px-2">
+                 <p className="text-[#5E9BFF] font-black text-[10px] md:text-xs uppercase tracking-tight break-words px-2">
                     {match.winner ? `${match.winner} WON` : 'MATCH DRAW / FINISHED'}
                  </p>
                  {match.resultSummary && <p className="text-slate-400 text-[8px] md:text-[10px] font-bold uppercase tracking-widest mt-1">{match.resultSummary}</p>}
@@ -487,11 +495,11 @@ const StudentMatchCard = ({ match }) => {
           </div>
         ) : (
           <div className="text-center py-4 md:py-6 bg-slate-800/50 rounded-xl md:rounded-2xl border border-slate-700 w-full">
-             <p className="text-base md:text-xl font-black text-white uppercase tracking-tighter wrap-break-word leading-tight px-2">{match.teamA}</p>
+             <p className="text-base md:text-xl font-black text-white uppercase tracking-tighter break-words leading-tight px-2">{match.teamA}</p>
              {isFinished && match.winner ? (
                <div className="mt-3 md:mt-4 flex flex-col items-center gap-1.5 md:gap-2">
                  <div className="bg-yellow-500/20 p-1.5 md:p-2 rounded-full border border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.3)]"><Trophy size={16} className="text-yellow-400 md:w-5 md:h-5"/></div>
-                 <p className={`text-[10px] md:text-xs font-black text-[#5E9BFF] uppercase tracking-widest mt-1 wrap-break-word max-w-full px-2 leading-tight`}>{match.winner} (Gold)</p>
+                 <p className={`text-[10px] md:text-xs font-black text-[#5E9BFF] uppercase tracking-widest mt-1 break-words max-w-full px-2 leading-tight`}>{match.winner} (Gold)</p>
                </div>
              ) : (
                <p className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mt-1.5 md:mt-2">Individual Event</p>

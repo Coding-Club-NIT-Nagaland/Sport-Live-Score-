@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Trophy, Calendar, PlusCircle, Medal, LogOut, Flag, Minus, Plus, Trash2, CheckCircle, X, Search, Play, Pause, RotateCcw, CircleDot, Edit3, AlertTriangle, ShieldCheck, UserCircle, MapPin, ChevronDown } from "lucide-react";
+import { Trophy, Calendar, PlusCircle, Medal, LogOut, Flag, Minus, Plus, Trash2, CheckCircle, X, Search, Play, Pause, RotateCcw, CircleDot, Edit3, AlertTriangle, ShieldCheck, UserCircle, MapPin, ChevronDown, ListOrdered } from "lucide-react";
 import { io } from "socket.io-client";
 
 const API_URL = import.meta.env.VITE_BACKEND_URL;
-// SAFE SOCKET CONFIGURATION (DO NOT CHANGE)
 const socket = io(API_URL, {
   transports: [ 'websocket','polling'],
   reconnection: true,
@@ -109,6 +108,9 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
   const [editingMatch, setEditingMatch] = useState(null);
   const [editForm, setEditForm] = useState({ scoreA: 0, scoreB: 0, setsA: 0, setsB: 0, winner: '', resultSummary: '' });
 
+  const [showLeaderboardEditor, setShowLeaderboardEditor] = useState(false);
+  const [leaderboardStats, setLeaderboardStats] = useState([]);
+
   const defaultSport = allowedSports[0] !== "Restricted Access" ? allowedSports[0] : "";
   const [newMatch, setNewMatch] = useState({
     sport: defaultSport, 
@@ -153,6 +155,29 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
     } catch (err) { return null; }
   };
 
+  const openLeaderboardEditor = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/houses`);
+      const dbHouses = await res.json();
+      
+      const formattedHouses = HOUSES.map(name => {
+         const found = dbHouses.find(h => h.name === name);
+         return { name, points: found ? found.points : 0 };
+      });
+      
+      setLeaderboardStats(formattedHouses);
+      setShowLeaderboardEditor(true);
+    } catch(err) { console.error(err); }
+  };
+
+  const saveLeaderboard = async () => {
+    const res = await apiCall('houses/override', 'PUT', { updates: leaderboardStats });
+    if (res) {
+      setShowLeaderboardEditor(false);
+      showAlert("Overall Championship Points Updated!");
+    }
+  };
+
   const changeScore = async (id, team, field, delta) => {
     const match = matches.find((m) => m._id === id);
     if (!match) return;
@@ -169,11 +194,12 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
     await apiCall(`matches/${id}`, "PUT", { servingTeam: newServe });
   };
 
+  // THE FIXED FINISH SET LOGIC
   const finishSet = async (match) => {
     const scoreA = match.scoreA?.points || 0;
     const scoreB = match.scoreB?.points || 0;
     
-    if (scoreA === scoreB) return alert("A set cannot end in a tie!");
+    if (scoreA === scoreB) return alert("A set cannot end in a tie! Play until one team wins.");
     
     const winner = scoreA > scoreB ? 'A' : 'B';
     const currentSetNum = (match.setHistory?.length || 0) + 1;
@@ -191,7 +217,7 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
 
     setMatches(prev => prev.map(m => m._id === match._id ? { ...m, ...payload } : m));
     await apiCall(`matches/${match._id}`, "PUT", payload);
-    showAlert(`Set ${currentSetNum} Result Saved`);
+    showAlert(`Set ${currentSetNum} complete! Winner: Team ${winner}`);
   };
 
   const toggleTimer = async (match) => {
@@ -272,13 +298,8 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
     setEditingMatch(null); showAlert("Match corrected successfully!");
   };
 
-  const getStatusFilter = () => {
-    if (activeTab === "live") return "Live";
-    if (activeTab === "upcoming") return "Upcoming";
-    return "Completed";
-  };
-
-  const displayMatches = matches.filter(m => m.status === getStatusFilter() && (adminSportAccess === 'All' || allowedSports.includes(m.sport)));
+  const filteredMatches = matches.filter(m => m.status === (activeTab === 'live' ? 'Live' : activeTab === 'upcoming' ? 'Upcoming' : 'Completed') && (adminSportAccess === 'All' || allowedSports.includes(m.sport)));
+  const displayMatches = activeTab === 'finished' ? [...filteredMatches].reverse() : filteredMatches;
 
   const handleLogout = () => {
     localStorage.clear();
@@ -308,7 +329,10 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
           </div>
           
           <div className="flex flex-col sm:flex-row items-center gap-4 md:gap-6 w-full lg:w-auto">
-            <button onClick={() => setShowScheduleForm(!showScheduleForm)} className="w-full sm:w-auto bg-[#5E9BFF] text-slate-900 px-6 py-3 md:px-8 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-blue-400 transition active:scale-95 shadow-[0_0_20px_rgba(94,155,255,0.4)] text-sm">
+            <button onClick={openLeaderboardEditor} className="w-full sm:w-auto bg-amber-500/10 text-amber-400 px-5 py-3 md:px-6 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-amber-500 hover:text-slate-900 transition active:scale-95 shadow-lg border border-amber-500/20 text-[10px] md:text-sm">
+              <Trophy size={16} /> Edit Points
+            </button>
+            <button onClick={() => setShowScheduleForm(!showScheduleForm)} className="w-full sm:w-auto bg-[#5E9BFF] text-slate-900 px-6 py-3 md:px-8 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-blue-400 transition active:scale-95 shadow-[0_0_20px_rgba(94,155,255,0.4)] text-[10px] md:text-sm">
               {showScheduleForm ? <X size={18} /> : <PlusCircle size={18} />} {showScheduleForm ? "Cancel" : "Add Match"}
             </button>
             <div className="flex flex-row items-center gap-3 md:gap-4 pl-0 sm:pl-6 sm:border-l border-slate-700/50 w-full sm:w-auto justify-between sm:justify-start bg-slate-800/30 sm:bg-transparent p-3 sm:p-0 rounded-2xl sm:rounded-none">
@@ -428,55 +452,53 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
 
                     {match.sport === 'Cricket' && isFinished ? (
                       <div className="text-center py-3 md:py-4 bg-slate-800/50 rounded-xl md:rounded-2xl border border-slate-700">
-                         <p className="font-black text-[#5E9BFF] text-base md:text-lg uppercase tracking-tight wrap-break-word leading-tight px-2">{match.winner} WON</p>
+                         <p className="font-black text-[#5E9BFF] text-base md:text-lg uppercase tracking-tight break-words leading-tight px-2">{match.winner} WON</p>
                          <p className="text-[10px] md:text-xs font-bold text-slate-400 mt-1">{match.resultSummary}</p>
                       </div>
                     ) : match.teamB ? (
-                      <div className="flex justify-between items-start text-center px-0 md:px-2">
-                        
-                        <div className="w-[45%] md:w-5/12 flex flex-col items-center">
-                          <p className={`font-black text-[9px] md:text-xs uppercase mb-3 md:mb-4 wrap-break-word leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>{match.teamA}</p>
+                      <div className="flex flex-col w-full">
+                        <div className="flex justify-between items-start text-center px-0 md:px-2">
                           
-                          {match.status === "Live" && config?.scoreUI !== "none" ? (
-                            <div className="bg-slate-800/50 p-2 md:p-5 rounded-2xl md:rounded-4xl border border-slate-700 flex flex-col items-center gap-3 relative w-full">
-                              {config?.hasServe && <button onClick={() => toggleServe(match._id, 'A')} className={`absolute top-1 md:top-2 left-1 md:left-2 text-[7px] md:text-[8px] font-black uppercase px-1.5 md:px-2 py-0.5 md:py-1 rounded-full transition shadow-sm ${match.servingTeam === 'A' ? 'bg-[#FF9B54] text-slate-900 shadow-[0_0_10px_rgba(255,155,84,0.5)]' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>Serve</button>}
-                              <div className={`flex items-center gap-1.5 md:gap-4 ${config?.hasServe ? 'mt-4' : ''}`}>
-                                <button onClick={() => changeScore(match._id, "scoreA", config?.scoreUI === "goals" ? "goals" : "points", -1) } className="p-1 md:p-2 bg-slate-700 text-slate-300 rounded-md md:rounded-xl hover:bg-slate-600"><Minus size={12} /></button>
-                                <span className="text-3xl md:text-5xl font-black text-white drop-shadow-md w-8 md:w-auto">{match.scoreA?.points || match.scoreA?.goals || 0}</span>
-                                <button onClick={() => changeScore(match._id, "scoreA", config?.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
-                              </div>
-                              {config?.scoreUI === "points_and_sets" && (
-                                <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-2 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700 mt-2">
-                                  <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase">Sets</span><span className="text-[10px] md:text-sm font-black text-[#5E9BFF]">{match.scoreA?.sets || 0}</span>
-                                  <button onClick={() => changeScore(match._id, "scoreA", "sets", 1) } className="text-[#5E9BFF]"><Plus size={10} /></button>
+                          <div className="w-[45%] md:w-5/12 flex flex-col items-center">
+                            <p className={`font-black text-[9px] md:text-xs uppercase mb-3 md:mb-4 break-words leading-tight ${isFinished && match.winner === match.teamA ? 'text-[#5E9BFF]' : 'text-white'}`}>{match.teamA}</p>
+                            
+                            {match.status === "Live" && config?.scoreUI !== "none" ? (
+                              <div className="bg-slate-800/50 p-2 md:p-5 rounded-2xl md:rounded-4xl border border-slate-700 flex flex-col items-center gap-3 relative w-full">
+                                {config?.hasServe && <button onClick={() => toggleServe(match._id, 'A')} className={`absolute top-1 md:top-2 left-1 md:left-2 text-[7px] md:text-[8px] font-black uppercase px-1.5 md:px-2 py-0.5 md:py-1 rounded-full transition shadow-sm ${match.servingTeam === 'A' ? 'bg-[#FF9B54] text-slate-900 shadow-[0_0_10px_rgba(255,155,84,0.5)]' : 'bg-slate-700 text-slate-400 border border-slate-600'}`}>Serve</button>}
+                                <div className={`flex items-center gap-1.5 md:gap-4 ${config?.hasServe ? 'mt-4' : ''}`}>
+                                  <button onClick={() => changeScore(match._id, "scoreA", config?.scoreUI === "goals" ? "goals" : "points", -1) } className="p-1 md:p-2 bg-slate-700 text-slate-300 rounded-md md:rounded-xl hover:bg-slate-600"><Minus size={12} /></button>
+                                  <span className="text-3xl md:text-5xl font-black text-white drop-shadow-md w-8 md:w-auto">{match.scoreA?.points || match.scoreA?.goals || 0}</span>
+                                  <button onClick={() => changeScore(match._id, "scoreA", config?.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
                                 </div>
-                              )}
-                              
-                              {config?.scoreUI === "points_and_sets" && match.status === 'Live' && (
-                                <button onClick={() => finishSet(match)} className="mt-3 bg-emerald-500/10 text-emerald-400 font-black text-[8px] md:text-[9px] uppercase tracking-widest px-3 py-1.5 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition w-full shadow-sm">
-                                  End Set
-                                </button>
-                              )}
-                              <button onClick={() => handleForfeit(match, match.teamA)} className="text-[7px] md:text-[9px] text-rose-500/70 font-black uppercase flex items-center gap-1 mt-2 hover:text-rose-500 transition"><Flag size={8} /> Forfeit</button>
-                            </div>
-                          ) : match.status === 'Completed' && config?.scoreUI !== "none" ? (
-                            <div className="py-2 md:py-4">
-                              <div className="text-4xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">
-                                {config?.scoreUI === 'points_and_sets' ? (match.scoreA?.sets || 0) : (match.scoreA?.points || match.scoreA?.goals || 0)}
+                                
+                                {/* REMOVED THE MANUAL SET PLUS BUTTON AND REPLACED IT WITH A SIMPLE DISPLAY */}
+                                {config?.scoreUI === "points_and_sets" && (
+                                  <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-3 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700 mt-2">
+                                    <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Sets Won</span>
+                                    <span className="text-[10px] md:text-sm font-black text-[#5E9BFF]">{match.scoreA?.sets || 0}</span>
+                                  </div>
+                                )}
+                                
+                                <button onClick={() => handleForfeit(match, match.teamA)} className="text-[7px] md:text-[9px] text-rose-500/70 font-black uppercase flex items-center gap-1 mt-2 hover:text-rose-500 transition"><Flag size={8} /> Forfeit</button>
                               </div>
-                              {config?.scoreUI === 'points_and_sets' ? (
-                                <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1 md:mt-2 block">Sets Won</span>
-                              ) : (
-                                match.scoreA?.sets > 0 && <span className="text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase mt-1 md:mt-2 block">Sets: {match.scoreA.sets}</span>
-                              )}
-                            </div>
-                          ) : <div className="h-20 md:h-28 flex items-center justify-center font-black text-slate-600 uppercase tracking-[0.2em] text-[8px] md:text-[10px] border-2 border-dashed border-slate-700 rounded-2xl md:rounded-4xl">{isFinished ? 'Finished' : 'Awaiting'}</div>}
+                            ) : match.status === 'Completed' && config?.scoreUI !== "none" ? (
+                              <div className="py-2 md:py-4">
+                                <div className="text-4xl md:text-5xl font-black text-white tracking-tighter drop-shadow-md">
+                                  {config?.scoreUI === 'points_and_sets' ? (match.scoreA?.sets || 0) : (match.scoreA?.points || match.scoreA?.goals || 0)}
+                                </div>
+                                {config?.scoreUI === 'points_and_sets' ? (
+                                  <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1 md:mt-2 block">Sets Won</span>
+                                ) : (
+                                  match.scoreA?.sets > 0 && <span className="text-[8px] md:text-[10px] font-bold text-[#5E9BFF] uppercase mt-1 md:mt-2 block">Sets: {match.scoreA.sets}</span>
+                                )}
+                              </div>
+                            ) : <div className="h-20 md:h-28 flex items-center justify-center font-black text-slate-600 uppercase tracking-[0.2em] text-[8px] md:text-[10px] border-2 border-dashed border-slate-700 rounded-2xl md:rounded-4xl">{isFinished ? 'Finished' : 'Awaiting'}</div>}
                         </div>
 
                         <div className="w-[10%] md:w-2/12 flex flex-col items-center mt-3 md:mt-4"><span className="text-[8px] md:text-[9px] font-black text-slate-600 italic tracking-widest uppercase">vs</span></div>
 
                         <div className="w-[45%] md:w-5/12 flex flex-col items-center">
-                          <p className={`font-black text-[9px] md:text-xs uppercase mb-3 md:mb-4 wrap-break-word leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>{match.teamB || "OPEN FIELD"}</p>
+                          <p className={`font-black text-[9px] md:text-xs uppercase mb-3 md:mb-4 break-words leading-tight ${isFinished && match.winner === match.teamB ? 'text-[#5E9BFF]' : 'text-white'}`}>{match.teamB || "OPEN FIELD"}</p>
                           
                           {match.status === "Live" && config?.scoreUI !== "none" ? (
                             <div className="bg-slate-800/50 p-2 md:p-5 rounded-2xl md:rounded-4xl border border-slate-700 flex flex-col items-center gap-3 relative w-full">
@@ -486,18 +508,15 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                                 <span className="text-3xl md:text-5xl font-black text-white drop-shadow-md w-8 md:w-auto">{match.scoreB?.points || match.scoreB?.goals || 0}</span>
                                 <button onClick={() => changeScore(match._id, "scoreB", config?.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
                               </div>
+                              
+                              {/* REMOVED THE MANUAL SET PLUS BUTTON AND REPLACED IT WITH A SIMPLE DISPLAY */}
                               {config?.scoreUI === "points_and_sets" && (
-                                <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-2 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700 mt-2">
-                                  <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase">Sets</span><span className="text-[10px] md:text-sm font-black text-[#5E9BFF]">{match.scoreB?.sets || 0}</span>
-                                  <button onClick={() => changeScore(match._id, "scoreB", "sets", 1) } className="text-[#5E9BFF]"><Plus size={10} /></button>
+                                <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-3 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700 mt-2">
+                                  <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Sets Won</span>
+                                  <span className="text-[10px] md:text-sm font-black text-[#5E9BFF]">{match.scoreB?.sets || 0}</span>
                                 </div>
                               )}
-                              
-                              {config?.scoreUI === "points_and_sets" && match.status === 'Live' && (
-                                <button onClick={() => finishSet(match)} className="mt-3 bg-emerald-500/10 text-emerald-400 font-black text-[8px] md:text-[9px] uppercase tracking-widest px-3 py-1.5 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition w-full shadow-sm">
-                                  End Set
-                                </button>
-                              )}
+
                               <button onClick={() => handleForfeit(match, match.teamB)} className="text-[7px] md:text-[9px] text-rose-500/70 font-black uppercase flex items-center gap-1 mt-2 hover:text-rose-500 transition"><Flag size={8} /> Forfeit</button>
                             </div>
                           ) : match.status === 'Completed' && config?.scoreUI !== "none" ? (
@@ -514,9 +533,20 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                           ) : <div className="h-20 md:h-28 flex items-center justify-center font-black text-slate-600 uppercase tracking-[0.2em] text-[8px] md:text-[10px] border-2 border-dashed border-slate-700 rounded-2xl md:rounded-4xl">{isFinished ? 'Finished' : 'Awaiting'}</div>}
                         </div>
                       </div>
+                      
+                      {/* --- NEW: SINGLE END SET BUTTON --- */}
+                      {config?.scoreUI === "points_and_sets" && match.status === 'Live' && (
+                        <div className="mt-4 pt-4 border-t border-slate-800/50 w-full flex justify-center px-2">
+                          <button onClick={() => finishSet(match)} className="w-full bg-emerald-500/10 text-emerald-400 font-black text-[9px] md:text-[10px] uppercase tracking-widest px-4 py-3 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition shadow-sm flex items-center justify-center gap-2">
+                            <CheckCircle size={14}/> End Current Set & Record Score
+                          </button>
+                        </div>
+                      )}
+
+                    </div>
                     ) : (
                       <div className="text-center py-3 md:py-4 bg-slate-800/50 rounded-xl md:rounded-2xl border border-slate-700">
-                        <p className="text-base md:text-xl font-black text-white uppercase tracking-tighter px-2 wrap-break-word leading-tight">{match.teamA}</p>
+                        <p className="text-base md:text-xl font-black text-white uppercase tracking-tighter px-2 break-words leading-tight">{match.teamA}</p>
                         {isFinished && <p className="text-[10px] md:text-xs font-bold text-[#5E9BFF] mt-1 md:mt-2">{match.resultSummary}</p>}
                       </div>
                     )}
@@ -540,7 +570,7 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                       <span className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase flex flex-col sm:flex-row items-center gap-1 sm:gap-2">
                         <span className="flex items-center gap-1.5"><Calendar size={12} /> {match.date} @ {match.time}</span>
                         <span className="hidden sm:inline text-slate-700">•</span>
-                        <span className="flex items-center gap-1.5 text-[#FF9B54]"><MapPin size={12}/> {match.venue || 'Main Ground'}</span>
+                        <span className="flex items-center gap-1 text-[#FF9B54]/80"><MapPin size={12}/> {match.venue || 'Main Ground'}</span>
                       </span>
                       {match.status === "Live" ? (
                         <button onClick={() => setResolvingMatch(match)} className="w-full md:w-auto bg-rose-500/10 text-rose-400 px-6 py-2.5 md:px-8 md:py-3 rounded-lg md:rounded-xl font-black text-[9px] md:text-[10px] uppercase border border-rose-500/20 hover:bg-rose-500 hover:text-white transition">Finish Session</button>
@@ -561,6 +591,7 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
           )}
         </div>
 
+        {/* --- MODALS --- */}
         {resolvingMatch && (
         <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-[#0a0f1c] p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] max-w-xl w-full shadow-2xl border border-slate-800 animate-in zoom-in-95 duration-300 overflow-y-auto max-h-[90vh]">
@@ -591,7 +622,7 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
                   {housePointsAllocation.map((h, i) => (
                     <div key={h.name} className="flex justify-between items-center bg-slate-800 px-4 py-2.5 md:px-5 md:py-3 rounded-xl md:rounded-2xl border border-slate-700">
-                      <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase wrap-break-word leading-tight max-w-[120px]">{h.name.split(" ")[0]}</span>
+                      <span className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase break-words leading-tight max-w-[120px]">{h.name.split(" ")[0]}</span>
                       <input type="number" value={h.points} onChange={(e) => { const copy = [...housePointsAllocation]; copy[i].points = e.target.value; setHousePointsAllocation(copy); }} className="w-16 bg-transparent text-right font-black text-[#5E9BFF] outline-none text-sm md:text-base" placeholder="0" />
                     </div>
                   ))}
@@ -626,11 +657,11 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
               {SPORTS_CONFIG[editingMatch.sport]?.scoreUI !== 'none' && editingMatch.teamB && (
                  <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
                     <div className="flex-1 bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-800">
-                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 wrap-break-word leading-tight">{editingMatch.teamA} Score</label>
+                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 break-words leading-tight">{editingMatch.teamA} Score</label>
                        <input type="number" value={editForm.scoreA} onChange={e => setEditForm({...editForm, scoreA: e.target.value})} className="w-full text-xl md:text-2xl font-black bg-slate-800 text-white p-2.5 md:p-3 rounded-lg md:rounded-xl border border-slate-700 outline-none" />
                     </div>
                     <div className="flex-1 bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-800">
-                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 wrap-break-word leading-tight">{editingMatch.teamB} Score</label>
+                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 break-words leading-tight">{editingMatch.teamB} Score</label>
                        <input type="number" value={editForm.scoreB} onChange={e => setEditForm({...editForm, scoreB: e.target.value})} className="w-full text-xl md:text-2xl font-black bg-slate-800 text-white p-2.5 md:p-3 rounded-lg md:rounded-xl border border-slate-700 outline-none" />
                     </div>
                  </div>
@@ -649,6 +680,51 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
             <div className="flex flex-col md:flex-row gap-3 md:gap-4">
               <button onClick={() => setEditingMatch(null)} className="w-full md:flex-1 py-3.5 md:py-4 bg-slate-800 rounded-xl md:rounded-2xl font-black text-slate-400 uppercase tracking-widest hover:bg-slate-700 transition text-xs">Cancel</button>
               <button onClick={saveEdit} className="w-full md:flex-1 py-3.5 md:py-4 bg-[#5E9BFF] text-slate-900 rounded-xl md:rounded-2xl font-black uppercase tracking-widest shadow-[0_0_20px_rgba(94,155,255,0.4)] hover:bg-blue-400 transition text-xs">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLeaderboardEditor && (
+        <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0a0f1c] p-6 md:p-10 rounded-[2rem] md:rounded-[3rem] max-w-xl w-full shadow-2xl border border-slate-800 animate-in zoom-in-95 duration-300 overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-center mb-5 md:mb-6 border-b border-slate-800 pb-4 md:pb-6">
+              <div>
+                <h2 className="text-xl md:text-2xl font-black text-white tracking-tight uppercase flex items-center gap-3"><Trophy className="text-amber-400"/> Edit Points</h2>
+                <p className="text-[10px] md:text-xs text-slate-400 font-bold mt-1">Manual override for overall Championship</p>
+              </div>
+              <button onClick={() => setShowLeaderboardEditor(false)} className="bg-slate-800 p-2 md:p-3 rounded-xl md:rounded-2xl text-slate-400 hover:text-white transition"><X size={18} /></button>
+            </div>
+            
+            <div className="bg-amber-500/10 p-3 md:p-4 rounded-xl md:rounded-2xl flex items-start gap-2 md:gap-3 border border-amber-500/20 mb-5 md:mb-6">
+               <AlertTriangle size={18} className="text-amber-400 shrink-0"/>
+               <p className="text-[9px] md:text-[10px] font-bold text-amber-300 uppercase tracking-wide leading-relaxed">Warning: Saving this form will instantly overwrite the total points on the public leaderboard. Ensure your math is correct.</p>
+            </div>
+
+            <div className="space-y-3 md:space-y-4 mb-6 md:mb-8">
+              {leaderboardStats.map((house, idx) => (
+                 <div key={house.name} className="flex justify-between items-center bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-800">
+                    <span className="text-[10px] md:text-xs font-black text-slate-300 uppercase tracking-widest truncate">{house.name}</span>
+                    <div className="flex items-center gap-3">
+                       <span className="text-[8px] font-black text-slate-600 uppercase">Total:</span>
+                       <input 
+                          type="number" 
+                          value={house.points} 
+                          onChange={(e) => {
+                             const newStats = [...leaderboardStats];
+                             newStats[idx].points = e.target.value;
+                             setLeaderboardStats(newStats);
+                          }} 
+                          className="w-20 text-lg md:text-xl font-black bg-slate-800 text-[#5E9BFF] p-2 rounded-lg border border-slate-700 outline-none text-right" 
+                       />
+                    </div>
+                 </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col md:flex-row gap-3 md:gap-4">
+              <button onClick={() => setShowLeaderboardEditor(false)} className="w-full md:flex-1 py-3.5 md:py-4 bg-slate-800 rounded-xl md:rounded-2xl font-black text-slate-400 uppercase tracking-widest hover:bg-slate-700 transition text-xs">Cancel</button>
+              <button onClick={saveLeaderboard} className="w-full md:flex-1 py-3.5 md:py-4 bg-amber-500 text-slate-900 rounded-xl md:rounded-2xl font-black uppercase tracking-widest shadow-[0_0_20px_rgba(245,158,11,0.4)] hover:bg-amber-400 transition text-xs">Publish Override</button>
             </div>
           </div>
         </div>

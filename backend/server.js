@@ -246,6 +246,26 @@ app.delete('/api/matches/:id', verifyToken, async (req, res) => {
   }
   res.status(403).json({ error: "Unauthorized." });
 });
+app.put('/api/houses/override', verifyToken, async (req, res) => {
+  try {
+    const { updates } = req.body; // Expects an array: [{name: 'Wolves', points: 15}, ...]
+    if (updates && Array.isArray(updates)) {
+      for (const u of updates) {
+        await House.findOneAndUpdate(
+          { name: u.name },
+          { points: Number(u.points) },
+          { upsert: true }
+        );
+      }
+      io.emit('leaderboardUpdated'); 
+      res.json({ message: "Points overridden successfully" });
+    } else {
+      res.status(400).json({ error: "Invalid data" });
+    }
+  } catch (error) {
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
