@@ -43,7 +43,7 @@ const calculateStandings = (matchesData) => {
   matchesData.forEach(m => {
      if(m.status !== 'Completed' || !m.teamB || m.sport === 'Cricket') return;
      if(!standings[m.sport]) standings[m.sport] = {};
-     const group = m.group || 'Group Stage';
+     const group = `${m.category || 'Open'} • ${m.group || 'Group Stage'}`; 
      if(!standings[m.sport][group]) standings[m.sport][group] = {};
      
      const initTeam = (n) => { if(!standings[m.sport][group][n]) standings[m.sport][group][n] = { team: n, p:0, w:0, l:0, d:0, pts:0 }; };
