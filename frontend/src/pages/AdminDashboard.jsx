@@ -32,7 +32,7 @@ const SPORTS_CONFIG = {
   Badminton: { categories: [ "Men Singles", "Women Singles", "Men Doubles", "Women Doubles" ], type: "HeadToHead", scoreUI: "points_and_sets", hasTimer: false, hasServe: true },
   Carrom: { categories: ["Men Singles", "Women Doubles"], type: "HeadToHead", scoreUI: "points", hasTimer: false },
   Chess: { categories: ["Men", "Women"], type: "HeadToHead", scoreUI: "points", hasTimer: false },
-  "Table Tennis": { categories: ["Singles", "Doubles"], type: "HeadToHead", scoreUI: "points_and_sets", hasTimer: false, hasServe: true },
+  "Table Tennis": { categories: [ "Men Singles", "Women Singles", "Men Doubles", "Women Doubles" ], type: "HeadToHead", scoreUI: "points_and_sets", hasTimer: false, hasServe: true },
   "Tug of War": { categories: ["Men", "Women"], type: "HeadToHead", scoreUI: "points", hasTimer: true },
   "Kho-Kho": { categories: ["Men", "Women"], type: "HeadToHead", scoreUI: "points", hasTimer: true },
   Marathon: { categories: ["Unlimited"], type: "Athletics", scoreUI: "none", hasTimer: false },
@@ -194,7 +194,6 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
     await apiCall(`matches/${id}`, "PUT", { servingTeam: newServe });
   };
 
-  // THE FIXED FINISH SET LOGIC
   const finishSet = async (match) => {
     const scoreA = match.scoreA?.points || 0;
     const scoreB = match.scoreB?.points || 0;
@@ -418,12 +417,15 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                 return (
                   <div key={match._id} className={`bg-slate-900/50 backdrop-blur-md p-5 md:p-8 rounded-[2rem] md:rounded-[2.5rem] border border-slate-800 shadow-xl relative group transition-all duration-500 overflow-hidden w-full ${isFinished ? 'opacity-80 grayscale-20' : 'hover:border-slate-600'}`}>
                     
-                    <div className="flex justify-between items-start mb-5 md:mb-6">
-                      <div className="flex flex-col gap-1">
-                        <span className="font-black text-[#5E9BFF] bg-[#5E9BFF]/10 border border-[#5E9BFF]/20 uppercase text-[9px] md:text-[10px] tracking-[0.2em] px-2.5 py-1 rounded-lg w-fit truncate max-w-[150px] md:max-w-full">{match.sport}</span>
-                        <span className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">{match.category} • {match.group}</span>
+                    <div className="flex justify-between items-start mb-5 md:mb-6 border-b border-slate-800/50 pb-4">
+                      <div className="flex flex-col gap-1.5 pr-2">
+                        {/* FIXED: Added conditional check so if category is missing it doesn't show a floating dot */}
+                        <span className="font-black text-[#5E9BFF] bg-[#5E9BFF]/10 border border-[#5E9BFF]/20 uppercase text-[9px] md:text-[10px] tracking-[0.2em] px-2.5 py-1.5 rounded-lg break-words whitespace-normal leading-relaxed inline-block">
+                           {match.sport} {match.category && match.category !== 'Open' ? `• ${match.category}` : ''}
+                        </span>
+                        <span className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">{match.group}</span>
                       </div>
-                      <button onClick={() => handleDeleteMatch(match._id)} className="p-1.5 md:p-2 text-slate-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition"><Trash2 size={18} /></button>
+                      <button onClick={() => handleDeleteMatch(match._id)} className="p-1.5 md:p-2 text-slate-600 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition shrink-0"><Trash2 size={18} /></button>
                     </div>
 
                     {match.status === 'Live' && config?.hasTimer && (
@@ -471,7 +473,6 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                                   <button onClick={() => changeScore(match._id, "scoreA", config?.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
                                 </div>
                                 
-                                {/* REMOVED THE MANUAL SET PLUS BUTTON AND REPLACED IT WITH A SIMPLE DISPLAY */}
                                 {config?.scoreUI === "points_and_sets" && (
                                   <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-3 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700 mt-2">
                                     <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Sets Won</span>
@@ -509,7 +510,6 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                                 <button onClick={() => changeScore(match._id, "scoreB", config?.scoreUI === "goals" ? "goals" : "points", 1) } className="p-1 md:p-2 bg-[#5E9BFF] text-slate-900 rounded-md md:rounded-xl shadow-[0_0_15px_rgba(94,155,255,0.4)]"><Plus size={12} /></button>
                               </div>
                               
-                              {/* REMOVED THE MANUAL SET PLUS BUTTON AND REPLACED IT WITH A SIMPLE DISPLAY */}
                               {config?.scoreUI === "points_and_sets" && (
                                 <div className="flex items-center gap-1.5 md:gap-3 bg-slate-900/50 px-3 md:px-4 py-1 md:py-1.5 rounded-full border border-slate-700 mt-2">
                                   <span className="text-[8px] md:text-[10px] font-black text-slate-500 uppercase tracking-widest">Sets Won</span>
@@ -534,7 +534,6 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
                         </div>
                       </div>
                       
-                      {/* --- NEW: SINGLE END SET BUTTON --- */}
                       {config?.scoreUI === "points_and_sets" && match.status === 'Live' && (
                         <div className="mt-4 pt-4 border-t border-slate-800/50 w-full flex justify-center px-2">
                           <button onClick={() => finishSet(match)} className="w-full bg-emerald-500/10 text-emerald-400 font-black text-[9px] md:text-[10px] uppercase tracking-widest px-4 py-3 rounded-xl border border-emerald-500/20 hover:bg-emerald-500 hover:text-white transition shadow-sm flex items-center justify-center gap-2">
@@ -657,12 +656,34 @@ const AdminDashboard = ({ setIsAuthenticated }) => {
               {SPORTS_CONFIG[editingMatch.sport]?.scoreUI !== 'none' && editingMatch.teamB && (
                  <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
                     <div className="flex-1 bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-800">
-                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 break-words leading-tight">{editingMatch.teamA} Score</label>
-                       <input type="number" value={editForm.scoreA} onChange={e => setEditForm({...editForm, scoreA: e.target.value})} className="w-full text-xl md:text-2xl font-black bg-slate-800 text-white p-2.5 md:p-3 rounded-lg md:rounded-xl border border-slate-700 outline-none" />
+                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 break-words leading-tight">
+                         {editingMatch.teamA} {SPORTS_CONFIG[editingMatch.sport]?.scoreUI === 'points_and_sets' ? 'Sets' : 'Score'}
+                       </label>
+                       {/* FIXED: Added support to edit Sets instead of just Points for Court games */}
+                       <input 
+                         type="number" 
+                         value={SPORTS_CONFIG[editingMatch.sport]?.scoreUI === 'points_and_sets' ? editForm.setsA : editForm.scoreA} 
+                         onChange={e => {
+                           if(SPORTS_CONFIG[editingMatch.sport]?.scoreUI === 'points_and_sets') setEditForm({...editForm, setsA: e.target.value});
+                           else setEditForm({...editForm, scoreA: e.target.value});
+                         }} 
+                         className="w-full text-xl md:text-2xl font-black bg-slate-800 text-white p-2.5 md:p-3 rounded-lg md:rounded-xl border border-slate-700 outline-none" 
+                       />
                     </div>
                     <div className="flex-1 bg-slate-900 p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-800">
-                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 break-words leading-tight">{editingMatch.teamB} Score</label>
-                       <input type="number" value={editForm.scoreB} onChange={e => setEditForm({...editForm, scoreB: e.target.value})} className="w-full text-xl md:text-2xl font-black bg-slate-800 text-white p-2.5 md:p-3 rounded-lg md:rounded-xl border border-slate-700 outline-none" />
+                       <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase block mb-1.5 md:mb-2 break-words leading-tight">
+                         {editingMatch.teamB} {SPORTS_CONFIG[editingMatch.sport]?.scoreUI === 'points_and_sets' ? 'Sets' : 'Score'}
+                       </label>
+                       {/* FIXED: Added support to edit Sets instead of just Points for Court games */}
+                       <input 
+                         type="number" 
+                         value={SPORTS_CONFIG[editingMatch.sport]?.scoreUI === 'points_and_sets' ? editForm.setsB : editForm.scoreB} 
+                         onChange={e => {
+                           if(SPORTS_CONFIG[editingMatch.sport]?.scoreUI === 'points_and_sets') setEditForm({...editForm, setsB: e.target.value});
+                           else setEditForm({...editForm, scoreB: e.target.value});
+                         }} 
+                         className="w-full text-xl md:text-2xl font-black bg-slate-800 text-white p-2.5 md:p-3 rounded-lg md:rounded-xl border border-slate-700 outline-none" 
+                       />
                     </div>
                  </div>
               )}
